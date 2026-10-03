@@ -187,6 +187,13 @@ class Finisher(unittest.TestCase):
         self.assertTrue(any(d.sprite == "banner" for d in draws))
         self.assertFalse(fx.beam_wide(gothic.BEAM_WIDE_S))
 
+    def test_a_new_version_comes_in_her_shapes(self):
+        pill = fx._banner(fx.version_words("0.15.0"), 18, 2, fx.version_tint())
+        self.assertGreater(fx.version_banner("0.15.0", H).width, pill.width)  # bat wings out of its sides
+        draws = visible(fx.updated(W, H, 5.0, 1.0))
+        self.assertIn("version", {d.sprite for d in draws})
+        self.assertTrue({d.sprite for d in draws} - {"version"} <= set(SPRITES))
+
     def test_calm_skips_the_rays(self):
         image = fx.compose(frame(), [], SPRITES)
         calm = fx.beamed(image, W, H, 1.0, 5.0, [], SPRITES, calm=True)

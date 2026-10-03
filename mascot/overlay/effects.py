@@ -530,10 +530,12 @@ def hangul(text):
     return any("\uac00" <= c <= "\ud7a3" or "\u1100" <= c <= "\u11ff" or "\u3130" <= c <= "\u318f" for c in text)
 
 
-def _banner(text, size, line):
-    """`text` on a sticker pill in her accent, white letters with a darker
-    rim: the beam's call. A Japanese face when Windows has one (a Korean
-    one for Hangul), else CALL_PLAIN."""
+def _banner(text, size, line, tint=None, plain=None):
+    """`text` on a sticker pill in her accent (or `tint`: soft top, fill,
+    shade), white letters with a darker rim: the beam's call. A Japanese
+    face when Windows has one (a Korean one for Hangul), else `plain`
+    (CALL_PLAIN)."""
+    soft, fill, shade = tint or (ACCENT_SOFT, ACCENT, ACCENT_SHADE)
     font = None
     for name in ("malgunbd.ttf", "malgun.ttf") if hangul(text) else ("YuGothB.ttc", "meiryob.ttc", "msgothic.ttc"):
         try:
@@ -542,16 +544,16 @@ def _banner(text, size, line):
         except OSError:
             continue
     if font is None:
-        text, font = CALL_PLAIN, ImageFont.load_default()
+        text, font = plain or CALL_PLAIN, ImageFont.load_default()
     S = SUPER
     left, top, right, bottom = font.getbbox(text, stroke_width=S * 2)
     tw, th = right - left, bottom - top
     w, h = tw / S + size * 1.1, th / S + size * 0.6
     shape, d = _mask(w, h)
     d.rounded_rectangle((S, S, (w + 1) * S, (h + 1) * S), radius=h * S / 2, fill=255)
-    out = _filled(shape, ACCENT_SOFT, ACCENT, ACCENT_SHADE, line)
+    out = _filled(shape, soft, fill, shade, line)
     ImageDraw.Draw(out).text(((w + 2) * S / 2 - tw / 2 - left, (h + 2) * S / 2 - th / 2 - top), text, font=font,
-                             fill=WHITE, stroke_width=S * 2, stroke_fill=ACCENT_SHADE)
+                             fill=WHITE, stroke_width=S * 2, stroke_fill=shade)
     return _down(out)
 
 
@@ -953,6 +955,86 @@ def beam(w, h, t, age):
                 draws.append(Draw("star_" + ("accent", "main", "gold")[i], x * w, y * h, 0.3 + 0.6 * pulse(q / 0.6), pulse(q / 0.6), 45 * q))
     return draws
 
+
+# A new version: the first time a newer one runs (the mod says so in the
+# session file's `update`), her version on a sticker banner over her head in
+# her main color, stars and notes fountaining up around her and sparkles by
+# the banner, over whatever she is doing. Calm keeps the banner alone. The
+# window is BEAM_PAD larger meanwhile (`celebrated`), as for the beam.
+UPDATE_S = 3.4
+UPDATE_BANNER_S = (0.15, 3.1)
+UPDATE_AT = -0.04  # the banner's middle, a share of her height above her head
+
+
+def version_banner(version, height):
+    """The banner's sprite, "NEW! v0.15.0", for a mascot `height` px tall."""
+    if STYLE:
+        return STYLE.version_banner(version, height)
+    k = height / BASE_HEIGHT
+
+    def px(v):
+        return max(1, round(v * k))
+
+    words = version_words(version)
+    pill = _banner(words, px(18), px(2), version_tint(), words)
+    return _glow(_sticker(pill, px(2)), MAIN_LIGHT, px(4), 0.6)
+
+
+def version_words(version):
+    return f"NEW! v{version}"
+
+
+def version_tint():
+    """The version banner's colors: her main ink, lightened at the top."""
+    return tuple(round(c + (255 - c) * 0.45) for c in MAIN), MAIN, MAIN_SHADE
+
+
+def updated(w, h, t, age, calm=False):
+    """The new version's sprites over her, `age` s in (frame coordinates;
+    the banner stands above the frame)."""
+    if STYLE:
+        return STYLE.updated(w, h, t, age, calm)
+    return _updated(w, h, t, age, calm)
+
+
+def _updated(w, h, t, age, calm):
+    """Miku's new-version motion: a style with the same sprite names may
+    use it too."""
+    draws = []
+    start, end = UPDATE_BANNER_S
+    if start <= age < end:
+        b = age - start
+        sway = 0.0 if calm else 5 * math.exp(-4 * b) * math.sin(b * 14) - 2
+        draws.append(Draw("version", 0.5 * w, UPDATE_AT * h - 3 * pulse(b / 0.5), pop(b, 0, 0.3),
+                          min(1.0, (end - age) / 0.3), sway))
+    if calm:
+        return draws
+    # Stars and notes rising from her feet on both sides, slowing as they go.
+    for i in range(12):
+        p = (age - 0.08 * i) / 1.7
+        if not 0 <= p < 1:
+            continue
+        side = -1 if i % 2 else 1
+        x = 0.5 * w + side * w * (0.3 + 0.1 * math.sin(i * 1.7)) * (0.7 + 0.3 * p) + 0.03 * w * math.sin(p * 9 + i)
+        y = h * (0.95 - 0.95 * (1 - (1 - p) ** 2))
+        sprite = ("star_main", "note_accent", "star_accent", "note_main", "star_gold", "spark_main")[i % 6]
+        draws.append(Draw(sprite, x, y, 0.5 + 0.5 * pop(p * 1.7, 0, 0.2), min(1.0, (1 - p) / 0.3), 30 * math.sin(p * 4 + i)))
+    # Sparkles twinkling around the banner.
+    if age > 0.4:
+        for i in range(4):
+            q = ((age - 0.4 - 0.25 * i) % 0.9) / 0.9
+            y = (UPDATE_AT + (0.06 if i % 2 else -0.06)) * h
+            draws.append(Draw("spark_" + ("accent" if i % 2 else "main"), (0.5 + (i - 1.5) * 0.28) * w, y,
+                              1.3 * pulse(q), pulse(q), 90 * q))
+    return draws
+
+
+def celebrated(image, draws, sprites):
+    """The window's `image` (as compose() makes it) on a canvas BEAM_PAD
+    larger on every side, `draws` (the new version's) over her."""
+    out = Image.new("RGBA", (image.width + 2 * BEAM_PAD, image.height + 2 * BEAM_PAD), (0, 0, 0, 0))
+    out.alpha_composite(image, (BEAM_PAD, BEAM_PAD))
+    return paint(out, draws, sprites, (PAD_LEFT + BEAM_PAD, PAD_TOP + BEAM_PAD))
 
 
 _line_fades = {}

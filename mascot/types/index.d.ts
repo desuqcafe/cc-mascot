@@ -19,8 +19,9 @@ export type MascotVisibility = { visible: boolean; at: number }
  * conversation was last cleared (`cleared`, clock ms: the overlay plays a
  * channel change), the character it shows (`character`, a folder under
  * frames/: a new one makes the overlay play its outro, take on that art and
- * look, and play its intro), and `ended` once the session is over (the
- * overlay then plays its outro, cleans up and exits).
+ * look, and play its intro), `update` (the mascot's version and its
+ * updates, for the settings window and the overlay), and `ended` once the
+ * session is over (the overlay then plays its outro, cleans up and exits).
  * `~/.claude/mascot/all.json` holds a MascotVisibility for every session.
  */
 export type MascotSessionFile = {
@@ -30,7 +31,27 @@ export type MascotSessionFile = {
   visibleAt: number
   cleared?: number
   character?: string
+  update?: MascotUpdate
   ended?: true
+}
+
+/**
+ * The mascot's version and its updates: `version` the one running; `latest`
+ * a newer release the daily check found (`checkUpdates`); `route` how this
+ * copy updates ('marketplace': `claude plugin update`, 'clone': `git pull`,
+ * 'manual': by hand); `state` an update run from this session ('updating',
+ * 'updated', or 'failed' with `message`); `celebrate` (epoch ms) when a
+ * newer version than the last one run first loaded, `from` that one: the
+ * overlay plays its banner once, while that is fresh.
+ */
+export type MascotUpdate = {
+  version: string
+  latest?: string
+  route: 'marketplace' | 'clone' | 'manual'
+  state?: 'updating' | 'updated' | 'failed'
+  message?: string
+  celebrate?: number
+  from?: string
 }
 
 /**
@@ -41,7 +62,8 @@ export type MascotSessionFile = {
  * tokens at which her aura's three levels start, ascending, or false for none
  * ([300000, 400000, 500000]); `beamAfter` the minutes a round of work lasts
  * before it ends in the beam (1-120), or false for never (2);
- * `beamForAgents` a round that used agents ends in it too (true).
+ * `beamForAgents` a round that used agents ends in it too (true);
+ * `checkUpdates` look for a newer release on GitHub once a day (false).
  */
 export type MascotSettings = {
   size?: number
@@ -49,6 +71,7 @@ export type MascotSettings = {
   aura?: [number, number, number] | false
   beamAfter?: number | false
   beamForAgents?: boolean
+  checkUpdates?: boolean
 }
 
 declare module 'claude-code' {

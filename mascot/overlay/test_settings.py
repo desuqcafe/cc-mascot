@@ -29,11 +29,13 @@ def raw(path):
 class Load(unittest.TestCase):
     def test_no_file_is_todays_behaviour(self):
         self.assertEqual(cfg.load(a_file()), cfg.DEFAULTS)
-        self.assertEqual(cfg.DEFAULTS, (420, False, (300_000, 400_000, 500_000), 2, True))
+        self.assertEqual(cfg.DEFAULTS, (420, False, (300_000, 400_000, 500_000), 2, True, False))
 
     def test_it_reads_what_was_set(self):
-        path = a_file({"size": 560, "calm": True, "aura": [200_000, 250_000, 900_000], "beamAfter": 10, "beamForAgents": False})
-        self.assertEqual(cfg.load(path), (560, True, (200_000, 250_000, 900_000), 10, False))
+        path = a_file({"size": 560, "calm": True, "aura": [200_000, 250_000, 900_000], "beamAfter": 10, "beamForAgents": False,
+                       "checkUpdates": True})
+        self.assertEqual(cfg.load(path), (560, True, (200_000, 250_000, 900_000), 10, False, True))
+        self.assertEqual(cfg.load(a_file({"checkUpdates": "yes"})).checkUpdates, False)
         self.assertEqual(cfg.load(a_file({"aura": False, "beamAfter": False})).aura, False)
         self.assertEqual(cfg.load(a_file({"aura": False, "beamAfter": False})).beamAfter, False)
 

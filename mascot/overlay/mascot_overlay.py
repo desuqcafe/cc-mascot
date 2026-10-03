@@ -41,7 +41,9 @@ predecessor's spot skips the intro. A new character in the session file
 (/mascot character) plays the outro, takes on that character's art and look
 in this same process and spot, and plays the intro. Her big finish, the beam mood, bursts
 past her window's usual edges (effects.beamed), so for its first seconds
-the window is effects.BEAM_PAD larger on every side.
+the window is effects.BEAM_PAD larger on every side. So is it while a new
+version's banner plays (effects.updated): once, when the mod says a newer
+version than the last one run has loaded (the session file's `update`).
 
 The overlay runs while its session does, shown or hidden, and says on stdout
 what was chosen in its window (`hidden`). Its art is loaded only while it is
@@ -394,8 +396,23 @@ def tag_image(text, size):
 Playing = namedtuple("Playing", "kind since then calm")
 Playing.__new__.__defaults__ = (False,)
 
-SessionState = namedtuple("SessionState", "mood info choice ended cleared character")
-SessionState.__new__.__defaults__ = (0, None)
+SessionState = namedtuple("SessionState", "mood info choice ended cleared character celebrate")
+SessionState.__new__.__defaults__ = (0, None, None)
+
+# A new version's banner is played when the mod's word of it (`celebrate`,
+# epoch ms) is this fresh; an overlay started later, by a reload, lets it be.
+CELEBRATE_FRESH_MS = 60_000
+
+
+def celebrate_of(data):
+    """(when, version) of the newer version the session file's `update` says
+    has loaded; None for none."""
+    update = data.get("update") if isinstance(data.get("update"), dict) else {}
+    at, version = update.get("celebrate"), update.get("version")
+    if isinstance(at, (int, float)) and not isinstance(at, bool) and isinstance(version, str) \
+            and re.fullmatch(r"\d+(\.\d+){1,3}", version):
+        return at, version
+    return None
 
 
 def read_json(path):
@@ -444,6 +461,7 @@ def read_state(path=None):
         data.get("ended") is True,
         data["cleared"] if isinstance(data.get("cleared"), (int, float)) and not isinstance(data.get("cleared"), bool) else 0,
         data["character"] if isinstance(data.get("character"), str) and re.fullmatch(r"[A-Za-z0-9_-]+", data["character"]) else None,
+        celebrate_of(data),
     )
 
 
@@ -614,6 +632,10 @@ def card_lines(mood, info, now_ms):
     if background:
         parts = [plural(n, kind.replace("_", " ")) for kind, n in sorted(background.items())]
         lines.append("Background: " + ", ".join(parts))
+
+    new = info.get("newVersion")
+    if isinstance(new, str) and re.fullmatch(r"\d+(\.\d+){1,3}", new):
+        lines.append(f"v{new} is out \u00b7 /mascot update")
 
     if info.get("sessionId"):
         lines.append(("dim", f"Session {info['sessionId'][:8]}"))
@@ -1147,6 +1169,12 @@ def run_window(parent, starter):
         # swinging; meanwhile the window has DRAG_PAD more room on every side.
         "carry": None,
         "margin": 0,
+        # A new version: the last word of one seen (epoch ms), one waiting
+        # to play (its version, while she cannot: hidden, coming in, carried)
+        # and since when it plays (monotonic s).
+        "celebrated": 0,
+        "celebrate": None,
+        "celebration": None,
     }
 
     def calm():
@@ -1235,6 +1263,14 @@ def run_window(parent, starter):
             state["margin"] = fx.DRAG_PAD
             window.show(image, *corner_at())
             return
+        celebration = state["celebration"]
+        if celebration is not None and not act and not (mood == "beam" and fx.beam_wide(age)) and "version" in sprites:
+            # A new version: the banner and its fountain need room too.
+            image = fx.compose(frame, draws, sprites, state["tag"], look.behind, look.over)
+            image = fx.celebrated(image, fx.updated(frame.width, frame.height, t, t - celebration, calm()), sprites)
+            state["margin"] = fx.BEAM_PAD
+            window.show(image, *corner_at())
+            return
         if mood == "beam" and not act and fx.beam_wide(age):
             # The burst needs room past her usual edges.
             image = fx.compose(frame, [], sprites, state["tag"], look.behind, look.over)
@@ -1270,8 +1306,10 @@ def run_window(parent, starter):
             carry.step(t, *velocity(t), frames[int(clock * fps) % len(frames)])
             if carry.over(t):
                 state["carry"], state["dirty"] = None, True
+        celebrate(t)
         status_moving = fx.status_moving(state["status"], state["status_was"], t - state["status_since"], calm())
-        busy = state["act"] is not None or state["carry"] is not None or fx.moving(mood, age)
+        busy = (state["act"] is not None or state["carry"] is not None or state["celebration"] is not None
+                or fx.moving(mood, age))
         moving = busy or status_moving
         cap = TICK_MS if busy else STATUS_TICK_MS if status_moving else STILL_TICK_MS
         if frames and state["shown"]:
@@ -1280,6 +1318,18 @@ def run_window(parent, starter):
                 state["frame"], state["dirty"] = index, False
                 draw(frames[index], mood, t, age)
         state["tick"] = root.after(next_tick_ms(age, fps, len(frames) if frames else 0, cap), animate)
+
+    def celebrate(t):
+        """Starts a new version's banner once she can show it (shown, not
+        coming, going or carried), while the word of it is fresh; ends it."""
+        due = state["celebrate"]
+        if due and state["shown"] and state["act"] is None and state["carry"] is None and sprites:
+            state["celebrate"] = None
+            if time.time() * 1000 - due[0] < CELEBRATE_FRESH_MS:
+                sprites["version"] = fx.version_banner(due[1], HEIGHT)
+                state["celebration"] = t
+        if state["celebration"] is not None and t - state["celebration"] >= fx.UPDATE_S:
+            state["celebration"], state["dirty"] = None, True
 
     def redraw():
         """Draws her now (a new mood, a new tag) instead of at the next tick."""
@@ -1364,6 +1414,7 @@ def run_window(parent, starter):
     def hide():
         state["act"] = None
         state["carry"] = None
+        state["celebration"] = None
         state["shown"] = False
         hide_card()
         root.withdraw()
@@ -1441,6 +1492,10 @@ def run_window(parent, starter):
                     state["cleared"] = current.cleared
                     if state["shown"] and state["act"] is None:
                         play("channel")
+                if current.celebrate and current.celebrate[0] != state["celebrated"]:
+                    # A newer version has loaded: her banner, once.
+                    state["celebrated"] = current.celebrate[0]
+                    state["celebrate"] = current.celebrate
                 state["info"], state["choice"], state["character"] = current.info, current.choice, current.character
                 # The mod has caught up with a choice made in this window.
                 if state["local"] and current.choice and current.choice[1] >= state["local"][1]:

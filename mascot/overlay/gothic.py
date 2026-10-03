@@ -438,10 +438,10 @@ def _grumpy_cloud(w, h, line):
     return big.resize(img.size, Image.LANCZOS)
 
 
-def _winged_banner(text, size, line):
-    """The call on her accent's sticker pill (fx._banner), bat wings out
-    of its sides."""
-    pill = fx._banner(text, size, line)
+def _winged_banner(text, size, line, tint=None, plain=None):
+    """The call on her accent's sticker pill (fx._banner; or `tint`'s),
+    bat wings out of its sides."""
+    pill = fx._banner(text, size, line, tint, plain)
     S = fx.SUPER
     span = round(pill.height * 1.5)
     n = span * S
@@ -459,6 +459,19 @@ def _winged_banner(text, size, line):
     out.alpha_composite(right, (out.width - span, max(0, wy)))
     out.alpha_composite(pill, (span - overlap, y))
     return out
+
+
+def version_banner(version, height):
+    """A new version's banner: her main ink's pill, bat wings and all."""
+    px = _px(height)
+    words = fx.version_words(version)
+    pill = _winged_banner(words, px(18), px(2), fx.version_tint(), words)
+    return fx._glow(fx._sticker(pill, px(2)), fx.MAIN_LIGHT, px(4), 0.6)
+
+
+def updated(w, h, t, age, calm=False):
+    """Miku's fountain, in her shapes: roses, bats and glints rising."""
+    return fx._updated(w, h, t, age, calm)
 
 
 def build_sprites(height):

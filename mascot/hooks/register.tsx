@@ -6,6 +6,7 @@ import type {
   MascotMood,
   MascotSessionFile,
   MascotSettings,
+  MascotUpdate,
   MascotVisibility,
   MascotWork,
 } from '../types'
@@ -44,6 +45,17 @@ const CHARACTERS_KEY = 'characters'
 const DEFAULT_CHARACTER = 'miku'
 // How long a restart waits for the old overlay to go before starting anyway.
 const STOP_WAIT_MS = 3000
+// Updates. A version newer than the last one a session ran (`$.store`) gets
+// her banner once, however it came. Looking for a newer release online is
+// the `checkUpdates` setting's, off by default: then, once a day, a read of
+// the manifest on GitHub's main branch, and nothing sent.
+const LATEST_URL = 'https://raw.githubusercontent.com/desuqcafe/cc-mascot/main/mascot/.claude-plugin/plugin.json'
+const CHECK_EVERY_MS = 24 * 60 * 60_000
+const VERSION_KEY = 'lastVersion'
+const LATEST_KEY = 'latest'
+const UPDATE_TIMEOUT_MS = 5 * 60_000
+// How long she stays happy under her banner.
+const CELEBRATE_MS = 3600
 
 const mood = atom({ plugin: 'mascot', key: 'mood' } as const, {
   frame: 'idle',
@@ -63,7 +75,14 @@ const work = atom({ plugin: 'mascot', key: 'work' } as const, {
 // overlay. overlay/settings.py holds the same rules: a key left out, or a
 // value that is not a valid one, is its default.
 type Settings = Required<{ [K in keyof MascotSettings]: Exclude<MascotSettings[K], undefined> }>
-const DEFAULTS: Settings = { size: 420, calm: false, aura: [300_000, 400_000, 500_000], beamAfter: 2, beamForAgents: true }
+const DEFAULTS: Settings = {
+  size: 420,
+  calm: false,
+  aura: [300_000, 400_000, 500_000],
+  beamAfter: 2,
+  beamForAgents: true,
+  checkUpdates: false,
+}
 const SIZE_RANGE = [240, 640] as const
 const SIZES: Record<string, number> = { small: 300, normal: 420, large: 560 }
 const AURA_RANGE = [10_000, 10_000_000] as const
@@ -83,6 +102,7 @@ const checks: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   },
   beamAfter: v => (v === false ? false : inRange(v, BEAM_RANGE) ? Math.round(v) : undefined),
   beamForAgents: v => (typeof v === 'boolean' ? v : undefined),
+  checkUpdates: v => (typeof v === 'boolean' ? v : undefined),
 }
 
 const viewState = atom({ plugin: 'mascot', key: 'view' } as const, { visible: false, at: 0 } as MascotVisibility)
@@ -111,6 +131,12 @@ let characterNow: string | undefined
 // A character picked for this session alone (the settings window, with
 // "Remember for this project" off); kept in `characterState`.
 let sessionCharacter: string | undefined
+// Her version and its updates, as the session file carries them; and how
+// this copy updates (`routeOf`).
+let release: MascotUpdate | undefined
+let updater: Route = { route: 'manual' }
+let isChecking = false
+let isUpdating = false
 
 // Permission dialogs shown, numbered, by tool: a call that failed after one
 // was shown for its tool was most likely declined, not broken.
@@ -138,6 +164,8 @@ type CardInfo = {
   turnSince?: number
   subagents: { type: string; tokens?: number; percent?: number }[]
   background: Record<string, number>
+  // A newer release the daily check found.
+  newVersion?: string
 }
 
 let frameNow: MascotFrame = 'idle'
@@ -188,6 +216,7 @@ const loadSettings = async ($: EngineInterface): Promise<Settings> => {
     aura: pick('aura'),
     beamAfter: pick('beamAfter'),
     beamForAgents: pick('beamForAgents'),
+    checkUpdates: pick('checkUpdates'),
   }
 }
 
@@ -233,6 +262,7 @@ const writeFile = async ($: EngineInterface) => {
       visibleAt: view.at,
       cleared: clearedAt,
       character: characterNow,
+      update: release,
     }
     if (path) await $.fs.write(path, JSON.stringify(file))
   } catch {
@@ -308,6 +338,7 @@ const refreshCard = async ($: EngineInterface) => {
             : undefined,
       })),
       background: live.background,
+      newVersion: release?.latest,
     }
     await writeFile($)
   } catch {
@@ -370,17 +401,184 @@ const beamName = async ($: EngineInterface) => {
 const characters = async ($: EngineInterface) =>
   ((await quiet($.fs.list(`${$.plugin.root}/frames`))) ?? []).filter(e => e.kind === 'dir').map(e => e.name).sort()
 
-// The interpreter by its full path. Looked up by name, a pythonw under the
+// A program by its full path. Looked up by name, a pythonw under the
 // session's folder is refused as unsafe, and a session started in the home
 // folder holds the Store's (AppData\Local\Microsoft\WindowsApps). `where`
 // searches PATH alone ($PATH:), not the current folder, so a repo still cannot
-// plant one. By name where there is no `where`.
-let pythonwPath: string | undefined
-const pythonw = async ($: EngineInterface) => {
-  if (pythonwPath) return pythonwPath
-  const found = await quiet($.process.run(['where', '$PATH:pythonw']))
-  pythonwPath = (found?.exitCode === 0 && found.stdout.split(/\r?\n/)[0]?.trim()) || 'pythonw'
-  return pythonwPath
+// plant one. An .exe before a script (npm's claude.cmd), and by name where
+// there is no `where`.
+const paths = new Map<string, string>()
+const fullPath = async ($: EngineInterface, name: string) => {
+  const known = paths.get(name)
+  if (known) return known
+  const found = await quiet($.process.run(['where', `$PATH:${name}`]))
+  const lines = found?.exitCode === 0 ? found.stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean) : []
+  const path = lines.find(l => /\.exe$/i.test(l)) ?? lines[0] ?? name
+  paths.set(name, path)
+  return path
+}
+
+const pythonw = ($: EngineInterface) => fullPath($, 'pythonw')
+
+// A command's argv: a script (.cmd, .bat) runs through cmd.exe.
+const commandLine = async ($: EngineInterface, name: string, ...args: string[]) => {
+  const path = await fullPath($, name)
+  return /\.(cmd|bat)$/i.test(path) ? ['cmd.exe', '/d', '/c', path, ...args] : [path, ...args]
+}
+
+// ---- updates
+
+type Route = { route: MascotUpdate['route']; marketplace?: string; repo?: string }
+
+// Versions compare part by part, as numbers: 0.14.10 is newer than 0.14.9.
+const isVersion = (v: unknown): v is string => typeof v === 'string' && /^\d+(\.\d+){1,3}$/.test(v)
+const isNewer = (a: string, b: string) => {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0)
+  }
+  return false
+}
+
+const versionIn = (manifest: string) => {
+  const data = JSON.parse(manifest) as { version?: unknown } | null
+  return isVersion(data?.version) ? data.version : undefined
+}
+
+// How this copy updates: a marketplace install lives in Claude Code's plugin
+// cache (`plugins/cache/<marketplace>/<plugin>/<version>`), a clone in a git
+// work tree (the folder holding this one); else by hand.
+const routeOf = async ($: EngineInterface): Promise<Route> => {
+  const parts = $.plugin.root.split(/[\\/]/).filter(Boolean)
+  const at = parts.lastIndexOf('cache')
+  if (at > 0 && parts[at - 1] === 'plugins' && parts[at + 1]) return { route: 'marketplace', marketplace: parts[at + 1] }
+  const repo = $.plugin.root.replace(/[\\/][^\\/]+[\\/]?$/, '')
+  if (repo && (await quiet($.fs.exists(`${repo}/.git`)))) return { route: 'clone', repo }
+  return { route: 'manual' }
+}
+
+// What's new in each version, shipped with the mod (whatsnew.json:
+// { "0.15.0": ["...", ...] }): the lines of the versions after `from`, up
+// to `to`, newest first.
+const notesBetween = async ($: EngineInterface, from: string, to: string) => {
+  try {
+    const all = JSON.parse(await $.fs.read(`${$.plugin.root}/whatsnew.json`)) as Record<string, unknown>
+    return Object.keys(all)
+      .filter(v => isVersion(v) && isNewer(v, from) && !isNewer(v, to))
+      .sort((a, b) => (isNewer(a, b) ? -1 : 1))
+      .flatMap(v => (Array.isArray(all[v]) ? (all[v] as unknown[]).filter(l => typeof l === 'string') : [])) as string[]
+  } catch {
+    return []
+  }
+}
+
+const setRelease = async ($: EngineInterface, changes: Partial<MascotUpdate>) => {
+  if (!release) return
+  release = { ...release, ...changes }
+  if (card) card = { ...card, newVersion: release.latest }
+  await writeFile($)
+}
+
+// Her version, and whether it is newer than the last one run: then her
+// banner (the overlay plays it once), a happy moment and what's new.
+const startRelease = async ($: EngineInterface) => {
+  try {
+    const version = versionIn(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+    if (!version) return
+    updater = await routeOf($)
+    const last = await quiet($.store.get(VERSION_KEY))
+    const seen = (await quiet($.store.get(LATEST_KEY))) as { version?: unknown } | undefined
+    const latest = isVersion(seen?.version) && isNewer(seen.version, version) ? seen.version : undefined
+    release = { version, route: updater.route, latest }
+    if (!isVersion(last) || isNewer(version, last)) await $.store.set(VERSION_KEY, version)
+    if (isVersion(last) && isNewer(version, last)) {
+      release.celebrate = await $.clock.now()
+      release.from = last
+      const [note] = await notesBetween($, last, version)
+      $.ui.toast(`Mascot updated to v${version}${note ? `: ${note}` : ''}`)
+      const { frame } = await read($, mood)
+      if (frame === 'idle' || frame === 'sleepy') await show($, 'happy', { holdMs: CELEBRATE_MS, after: 'idle' })
+    }
+    await writeFile($)
+    void checkForUpdates($)
+  } catch {
+    // A mascot never gets in the way of the session.
+  }
+}
+
+// Reads the newest release's version, once a day while `checkUpdates` is on
+// (`force`: now, asked for), and keeps what it found for every session.
+const checkForUpdates = async ($: EngineInterface, force = false) => {
+  if (!release || isChecking) return
+  isChecking = true
+  try {
+    if (!force && !(await loadSettings($)).checkUpdates) return
+    const now = await $.clock.now()
+    const seen = (await quiet($.store.get(LATEST_KEY))) as { at?: unknown; version?: unknown } | undefined
+    let latest = isVersion(seen?.version) ? seen.version : undefined
+    if (force || typeof seen?.at !== 'number' || now - seen.at >= CHECK_EVERY_MS) {
+      const answer = await $.http.fetch(LATEST_URL)
+      latest = answer.ok ? versionIn(answer.text) : undefined
+      if (latest) await $.store.set(LATEST_KEY, { at: now, version: latest })
+    }
+    const newer = latest && isNewer(latest, release.version) ? latest : undefined
+    if (newer !== release.latest) await setRelease($, { latest: newer })
+  } catch {
+    // Offline, or the release unreadable: try again tomorrow.
+  } finally {
+    isChecking = false
+  }
+}
+
+// Updates this copy as it was installed: `claude plugin update` for a
+// marketplace install, `git pull --ff-only` for a clone. The new version
+// loads with /reload-plugins or the next session (a clone's files changing
+// may reload it at once); her banner greets it. Says how it went.
+const runUpdate = async ($: EngineInterface): Promise<string> => {
+  if (!release) return 'Mascot: its version is unknown, so it cannot update itself.'
+  if (isUpdating) return 'Mascot: already updating.'
+  if (updater.route === 'manual') {
+    return 'Mascot: this copy came from neither the marketplace nor a git clone; update it by hand (github.com/desuqcafe/cc-mascot).'
+  }
+  isUpdating = true
+  await setRelease($, { state: 'updating', message: undefined })
+  try {
+    if (updater.route === 'marketplace') {
+      // Its catalog first, so the update sees the newest release.
+      await quiet($.process.run(await commandLine($, 'claude', 'plugin', 'marketplace', 'update', updater.marketplace!), {
+        timeoutMs: UPDATE_TIMEOUT_MS,
+      }))
+    }
+    const argv =
+      updater.route === 'marketplace'
+        ? await commandLine($, 'claude', 'plugin', 'update', `${$.plugin.name}@${updater.marketplace}`)
+        : await commandLine($, 'git', '-C', updater.repo!, 'pull', '--ff-only')
+    const done = await $.process.run(argv, { timeoutMs: UPDATE_TIMEOUT_MS })
+    const said = (done.stdout + '\n' + done.stderr).trim().split(/\r?\n/).filter(l => l.trim())
+    if (done.exitCode !== 0) throw new Error(said.pop() ?? `exit code ${done.exitCode}`)
+    if (said.some(l => /already (up to date|at the latest)/i.test(l))) {
+      await setRelease($, { state: undefined, latest: undefined })
+      return `Mascot v${release.version} is the latest.`
+    }
+    const message =
+      updater.route === 'marketplace'
+        ? 'Type /reload-plugins to meet her new version (or start a new session).'
+        : 'Pulled. She reloads by herself; if not, type /reload-plugins.'
+    await setRelease($, { state: 'updated', message })
+    return `Mascot updated. ${message}`
+  } catch (err) {
+    const message = (err instanceof Error ? err.message : String(err)).trim()
+    await setRelease($, { state: 'failed', message })
+    return `Mascot update failed: ${message}`
+  } finally {
+    isUpdating = false
+  }
+}
+
+// Runs an update and says how it went in a toast: the prompt stays free.
+const updateInBackground = ($: EngineInterface) => {
+  void runUpdate($).then(text => $.ui.toast(text)).catch(() => {})
 }
 
 // Starts this session's overlay, which shows or hides itself as `view` says.
@@ -436,8 +634,10 @@ const startOverlay = async ($: EngineInterface): Promise<string | undefined> => 
 // Opens the settings window (overlay/settings_window.py), in the colors of
 // this session's character; one already open for this session comes forward
 // instead (one open for another hands over to this one). It edits
-// settings.json, which every overlay follows, and picks this session's
-// character: `character NAME remember|session` on its stdout.
+// settings.json, which every overlay follows, and on its stdout picks this
+// session's character (`character NAME remember|session`), asks for a check
+// for a newer release (`check`, as its toggle turns the check on) or for the
+// update (`update`).
 const openSettingsWindow = async ($: EngineInterface): Promise<string | undefined> => {
   const dir = await stateDir($)
   const path = await sessionFile($).catch(() => undefined)
@@ -464,6 +664,10 @@ const openSettingsWindow = async ($: EngineInterface): Promise<string | undefine
           const [verb, name = '', how] = line.trim().split(/\s+/)
           if (verb === 'character' && (await characters($)).includes(name)) {
             await setCharacter($, name, how !== 'session').catch(() => {})
+          } else if (verb === 'check') {
+            void checkForUpdates($, true)
+          } else if (verb === 'update') {
+            updateInBackground($)
           }
         }
       }
@@ -605,6 +809,8 @@ const describe = {
     s.beamForAgents
       ? 'Rounds with subagents or background agents end in the beam.'
       : 'Rounds with subagents or background agents end in the beam only when long.',
+  checkUpdates: (s: Settings) =>
+    s.checkUpdates ? 'Looks for a new version once a day.' : 'Never goes online to look for a new version.',
 }
 
 const settingsSummary = (s: Settings) => Object.values(describe).map(line => line(s)).join(' ')
@@ -652,12 +858,22 @@ const settingsCommand = async ($: EngineInterface, words: string[]): Promise<str
     if (on !== 'on' && on !== 'off') return 'Beam agents takes on or off.'
     return set('beamForAgents', on === 'on')
   }
+  if (verb === 'updates' && !extra) {
+    const about = release
+      ? `Mascot v${release.version}${release.latest ? `; v${release.latest} is out: /mascot update` : ''}.`
+      : ''
+    if (!value) return `${about} ${await now('checkUpdates')} /mascot updates on|off.`.trim()
+    if (value !== 'on' && value !== 'off') return 'Updates takes on or off.'
+    const answer = await set('checkUpdates', value === 'on')
+    if (value === 'on') void checkForUpdates($, true)
+    return answer
+  }
   if (verb === 'settings' && !value) {
     const problem = await openSettingsWindow($)
     return `${problem ?? 'Settings window opened.'} ${settingsSummary(await loadSettings($))}`
   }
   if (verb === 'reset' && !value) {
-    await saveSettings($, { size: null, calm: null, aura: null, beamAfter: null, beamForAgents: null })
+    await saveSettings($, { size: null, calm: null, aura: null, beamAfter: null, beamForAgents: null, checkUpdates: null })
     return `Settings back to their defaults. ${settingsSummary(DEFAULTS)}`
   }
   return undefined
@@ -682,8 +898,9 @@ export const register: Register = on => {
     await $.command.register({
       name: 'mascot',
       description:
-        "Show or hide this session's mascot (or every session's), pick its character, fire her beam, or change her settings",
-      argumentHint: '[show|hide] [all] | character [name] | beam | settings | size | calm | aura | beam after | reset',
+        "Show or hide this session's mascot (or every session's), pick its character, fire her beam, update her, or change her settings",
+      argumentHint:
+        '[show|hide] [all] | character [name] | beam | update | settings | size | calm | aura | beam after | updates | reset',
       immediate: true,
     })
     // A reload keeps this session's choice; a new session takes the last one
@@ -691,8 +908,12 @@ export const register: Register = on => {
     // from another session reaches it.
     const kept = await read($, viewState).catch(() => undefined)
     view = kept?.at ? kept : { visible: (await quiet($.store.get(OVERLAY_KEY))) === true, at: await $.clock.now() }
-    void startOverlay($)
-    $.clock.every(REFRESH_EVERY_MS, () => void refreshCard($))
+    await startRelease($)
+    void startOverlay($).catch(() => {}).catch(() => {})
+    $.clock.every(REFRESH_EVERY_MS, () => {
+      void refreshCard($)
+      void checkForUpdates($)
+    })
     refreshSoon($)
 
     return next(e)
@@ -703,9 +924,10 @@ export const register: Register = on => {
     const [verb = '', target = '', extra] = words
     const help =
       'Usage: /mascot [show|hide] [all] toggles, shows or hides this session\'s mascot (or every session\'s); ' +
-      '/mascot character [name] lists or picks the character for this project; /mascot beam fires her beam. ' +
+      '/mascot character [name] lists or picks the character for this project; /mascot beam fires her beam; ' +
+      '/mascot update updates her to the newest version. ' +
       'Settings, for every mascot: /mascot settings; size [small|normal|large|<px>]; calm [on|off]; ' +
-      'aura [<3 token counts>|off]; beam after [<minutes>|never]; beam agents [on|off]; reset.'
+      'aura [<3 token counts>|off]; beam after [<minutes>|never]; beam agents [on|off]; updates [on|off]; reset.'
     try {
       const answer = await settingsCommand($, words)
       if (answer !== undefined) return { text: answer }
@@ -720,6 +942,12 @@ export const register: Register = on => {
       await show($, 'beam', { holdMs: BEAM_MS, after: back === 'beam' ? 'idle' : back })
       const call = `${await beamName($)}!`
       return { text: view.visible ? call : `${call} (She is hidden: /mascot show to see it.)` }
+    }
+    if (verb === 'update' && !target) {
+      if (!release) return { text: 'Mascot: its version is unknown, so it cannot update itself.' }
+      if (updater.route === 'manual' || isUpdating) return { text: await runUpdate($) }
+      updateInBackground($)
+      return { text: `Updating the mascot (v${release.version})... she will say when it is done.` }
     }
     if (verb === 'character') {
       const names = await characters($)

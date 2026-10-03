@@ -13,6 +13,8 @@ one, so a slip in the file never breaks a mascot:
                    BEAM_RANGE; false: never (2)
     beamForAgents  a round that used subagents or background agents ends in
                    the beam too (true)
+    checkUpdates   the mod looks for a newer release on GitHub once a day
+                   (false: the mascot never goes online)
 
 The mod (hooks/register.tsx) checks the same keys by the same rules.
 """
@@ -23,8 +25,9 @@ from collections import namedtuple
 
 FILE = "settings.json"
 
-Settings = namedtuple("Settings", "size calm aura beamAfter beamForAgents")
-DEFAULTS = Settings(size=420, calm=False, aura=(300_000, 400_000, 500_000), beamAfter=2, beamForAgents=True)
+Settings = namedtuple("Settings", "size calm aura beamAfter beamForAgents checkUpdates")
+DEFAULTS = Settings(size=420, calm=False, aura=(300_000, 400_000, 500_000), beamAfter=2, beamForAgents=True,
+                    checkUpdates=False)
 
 SIZE_RANGE = (240, 640)
 SIZES = {"small": 300, "normal": 420, "large": 560}
@@ -40,7 +43,7 @@ def check(key, value):
     """`value` as the setting `key` takes it, or None when it is not a valid one."""
     if key == "size":
         return round(value) if _number(value, *SIZE_RANGE) else None
-    if key in ("calm", "beamForAgents"):
+    if key in ("calm", "beamForAgents", "checkUpdates"):
         return value if isinstance(value, bool) else None
     if key == "aura":
         if value is False:

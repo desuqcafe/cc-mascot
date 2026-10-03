@@ -719,3 +719,166 @@ test('/mascot settings reads what was set by hand, valid values only', async ($,
   expect(text).toContain('Calm mode off.')
   expect(text).toContain('Aura from 300k, 400k, 500k tokens of context.')
 })
+
+// ---- updates
+
+// Stands in for the mod's own files (its manifest at `version`, and
+// whatsnew.json), toasts, `where` (finding nothing, so programs go by name)
+// and the commands an update runs, which answer `run`.
+const release = (
+  on: On,
+  version: string,
+  run: (argv: readonly string[]) => { exitCode: number; stdout?: string; stderr?: string } = () => ({ exitCode: 0 }),
+) => {
+  const disk = sessionFiles(on, undefined, path => {
+    if (/[\\/]\.claude-plugin[\\/]plugin\.json$/.test(path)) return JSON.stringify({ name: 'mascot', version })
+    if (/[\\/]whatsnew\.json$/.test(path)) {
+      return JSON.stringify({ '0.15.0': ['Updates, in her colors.', 'A banner.'], '0.14.1': ['Older news.'] })
+    }
+    return undefined
+  })
+  const toasts: string[] = []
+  const runs: (readonly string[])[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('process.run', (_$, e) => {
+    if (e.argv[0] === 'where') return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    runs.push(e.argv)
+    const { exitCode, stdout = '', stderr = '' } = run(e.argv)
+    return { value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  return { disk, toasts, runs }
+}
+
+const start = ($: Engine) => $.session.start({ cwd: 'C:/code/app', surface: 'terminal', isInteractive: true })
+
+test('a newer version than the last one run gets her banner and what is new, once', async ($, on) => {
+  const clock = mock.clock(on, { now: 50_000 })
+  const { disk, toasts } = release(on, '0.15.0')
+  const kept = store(on)
+  overlayProcess(on)
+  kept.set('lastVersion', '0.14.1')
+
+  await start($)
+  expect(disk.last()!.update).toMatchObject({ version: '0.15.0', from: '0.14.1', celebrate: 50_000 })
+  expect(kept.get('lastVersion')).toBe('0.15.0')
+  expect(toasts).toEqual(['Mascot updated to v0.15.0: Updates, in her colors.'])
+  expect(disk.last()!.frame).toBe('happy')
+  await clock.advance(3_600)
+  expect(disk.last()!.frame).toBe('idle')
+
+  // A reload of the same version: no banner again.
+  await start($)
+  expect(disk.last()!.update!.celebrate).toBeUndefined()
+  expect(toasts.length).toBe(1)
+})
+
+test('the first version ever run is only noted, and an older one leaves it', async ($, on) => {
+  mock.clock(on, { now: 50_000 })
+  const { disk, toasts } = release(on, '0.14.1')
+  const kept = store(on)
+  overlayProcess(on)
+
+  await start($)
+  expect(kept.get('lastVersion')).toBe('0.14.1')
+  expect(disk.last()!.update).toEqual({ version: '0.14.1', route: 'manual' })
+  expect(toasts).toEqual([])
+
+  kept.set('lastVersion', '0.20.0') // a session of a newer copy ran meanwhile
+  await start($)
+  expect(kept.get('lastVersion')).toBe('0.20.0')
+  expect(disk.last()!.update!.celebrate).toBeUndefined()
+})
+
+test('the check for a newer release is opt-in, and daily', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const { disk } = release(on, '0.15.0')
+  const kept = store(on)
+  overlayProcess(on)
+  const asked: string[] = []
+  let latest = '0.16.0'
+  let isOffline = false
+  on('http.fetch', (_$, e) => {
+    if (isOffline) return { deny: 'offline' }
+    asked.push(e.url)
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: 'mascot', version: latest }) } }
+  })
+
+  await start($)
+  await clock.advance(60_000)
+  expect(asked).toEqual([]) // off: never online
+
+  expect((await mascot($, 'updates')).text).toBe('Mascot v0.15.0. Never goes online to look for a new version. /mascot updates on|off.')
+  expect((await mascot($, 'updates on')).text).toBe('Looks for a new version once a day.')
+  await clock.advance(10)
+  expect(asked).toEqual(['https://raw.githubusercontent.com/desuqcafe/cc-mascot/main/mascot/.claude-plugin/plugin.json'])
+  expect(disk.last()!.update!.latest).toBe('0.16.0')
+  expect(kept.get('latest')).toEqual({ at: 1_060_000, version: '0.16.0' })
+  await clock.advance(30_000)
+  expect((disk.last()!.info as { newVersion?: string }).newVersion).toBe('0.16.0') // her hover card's hint
+  expect((await mascot($, 'updates')).text).toContain('v0.16.0 is out: /mascot update.')
+
+  // Within the day, what was found stands; then it looks again.
+  latest = '0.15.0'
+  await clock.advance(10 * 60_000)
+  expect(asked.length).toBe(1)
+  kept.set('latest', { at: clock.now() - 24 * 60 * 60_000, version: '0.16.0' }) // as a day goes by
+  await clock.advance(30_000)
+  expect(asked.length).toBe(2)
+  expect(disk.last()!.update!.latest).toBeUndefined()
+
+  // Offline: nothing changes, nothing breaks.
+  isOffline = true
+  await mascot($, 'updates on')
+  await clock.advance(10)
+  expect(disk.last()!.update!.latest).toBeUndefined()
+})
+
+test('/mascot update pulls a clone, and the settings window asks the same', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  let answer = { exitCode: 0, stdout: 'Updating 831a398..9f00e1c\nFast-forward' }
+  const { disk, toasts, runs } = release(on, '0.15.0', () => answer)
+  store(on)
+  const proc = overlayProcess(on)
+  on('fs.exists', (_$, e) => ({ value: /[\\/]\.git$/.test(e.path) }))
+
+  await start($)
+  expect(disk.last()!.update!.route).toBe('clone')
+  expect((await mascot($, 'update')).text).toBe('Updating the mascot (v0.15.0)... she will say when it is done.')
+  await clock.advance(10)
+  const [git, , repo, ...rest] = runs[0]!
+  expect(git).toBe('git')
+  expect(rest).toEqual(['pull', '--ff-only'])
+  expect(repo).not.toMatch(/[\\/]mascot$/) // the folder holding the mod
+  expect(disk.last()!.update).toMatchObject({ state: 'updated', message: 'Pulled. She reloads by herself; if not, type /reload-plugins.' })
+  expect(toasts.pop()).toBe('Mascot updated. Pulled. She reloads by herself; if not, type /reload-plugins.')
+
+  await mascot($, 'settings')
+  answer = { exitCode: 0, stdout: 'Already up to date.' }
+  proc.say('update\n')
+  await clock.advance(10)
+  expect(runs.length).toBe(2)
+  expect(toasts.pop()).toBe('Mascot v0.15.0 is the latest.')
+  expect(disk.last()!.update!.state).toBeUndefined()
+
+  answer = { exitCode: 1, stdout: '', stderr: 'hint: Diverging branches\nfatal: Not possible to fast-forward, aborting.' } as typeof answer
+  await mascot($, 'update')
+  await clock.advance(10)
+  expect(disk.last()!.update).toMatchObject({ state: 'failed', message: 'fatal: Not possible to fast-forward, aborting.' })
+})
+
+test('a copy installed by hand says how to update it', async ($, on) => {
+  mock.clock(on)
+  const { runs } = release(on, '0.15.0')
+  store(on)
+  overlayProcess(on)
+  on('fs.exists', () => ({ value: false }))
+
+  await start($)
+  expect((await mascot($, 'update')).text).toContain('update it by hand')
+  expect(runs).toEqual([])
+})

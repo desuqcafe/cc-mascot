@@ -436,6 +436,44 @@ class Beam(unittest.TestCase):
         self.assertEqual(fx._speed_lines((400, 500), (200, 220), 60, 0.0, 5.0).getbbox(), None)
 
 
+class NewVersion(unittest.TestCase):
+    """A new version: her banner over her head, a fountain of stars and notes."""
+
+    def test_the_banner_pops_up_then_goes(self):
+        def banner(age):
+            return [d for d in visible(fx.updated(W, H, 5.0, age)) if d.sprite == "version"]
+
+        self.assertEqual(banner(0.0), [])
+        shown = banner(1.0)
+        self.assertEqual(len(shown), 1)
+        self.assertLess(shown[0].y, 0)  # above her head
+        self.assertEqual(banner(fx.UPDATE_S), [])
+
+    def test_stars_and_notes_rise_around_her(self):
+        early = [d for d in visible(fx.updated(W, H, 5.0, 0.3)) if d.sprite != "version"]
+        later = [d for d in visible(fx.updated(W, H, 5.0, 1.0)) if d.sprite != "version"]
+        self.assertTrue(early and later)
+        self.assertLess(min(d.y for d in later), min(d.y for d in early))
+        self.assertTrue({d.sprite for d in later} <= set(SPRITES))
+
+    def test_calm_keeps_the_banner_alone(self):
+        self.assertEqual({d.sprite for d in visible(fx.updated(W, H, 5.0, 1.0, calm=True))}, {"version"})
+
+    def test_it_draws_with_room_around_her(self):
+        sprites = {**SPRITES, "version": fx.version_banner("0.15.0", H)}
+        image = fx.compose(frame(), [], sprites)
+        out = fx.celebrated(image, fx.updated(W, H, 5.0, 1.0), sprites)
+        self.assertEqual(out.size, (image.width + 2 * fx.BEAM_PAD, image.height + 2 * fx.BEAM_PAD))
+        top = out.crop((0, 0, out.width, fx.BEAM_PAD + fx.PAD_TOP)).getchannel("A").getbbox()
+        self.assertIsNotNone(top)  # the banner, above her
+
+    def test_the_banner_is_in_her_main_color(self):
+        banner = fx.version_banner("0.15.0", H)
+        self.assertGreater(banner.width, banner.height * 2)
+        middle = banner.convert("RGB").getpixel((banner.width // 6, banner.height // 2))
+        self.assertLess(sum(abs(a - b) for a, b in zip(middle, fx.MAIN)), 200)
+
+
 class Calm(unittest.TestCase):
     """Calm mode: what tells something stays, what flashes or jitters goes."""
 

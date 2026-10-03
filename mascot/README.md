@@ -29,6 +29,16 @@ A tag under her feet names the session's project (numbered, `app ·1`,
   she was doing.
 - `/mascot settings` opens the settings window; the other settings commands
   are below.
+- `/mascot update` updates her the way she was installed: `claude plugin
+  update` for a marketplace install, `git pull --ff-only` for a clone (a
+  copy that is neither says how to do it by hand). It runs in the
+  background and says how it went; `/reload-plugins` then loads the new
+  version (a clone's files changing may reload it on their own).
+- A new version greets you: the first time one newer than the last she
+  ran loads (however it came), she holds up a "NEW! v0.15.0" banner in her
+  main color while stars and notes fountain up around her, and a toast
+  says what is new (`whatsnew.json`). Once per version, for whichever
+  session loads it first.
 - Several mascots stand side by side, never on top of each other: the first
   in the main display's bottom-right corner, each next one to the left of the
   one before, wherever you dragged that one, on to your other displays when a
@@ -69,6 +79,7 @@ in `~/.claude/mascot/settings.json`, which holds only what you changed.
 | `/mascot aura [A B C\|off\|default]` | The context at which her aura's three levels start, going up (`300k 400k 500k` by default; `1.2M` works too), or no aura. |
 | `/mascot beam after [MINUTES\|never\|default]` | How long a round of work lasts before it ends in the beam instead of happy (2 minutes; up to 120), or never. |
 | `/mascot beam agents [on\|off]` | Whether a round that used subagents or background agents ends in the beam too (on). |
+| `/mascot updates [on\|off]` | Look for a newer version once a day (off): one read of this plugin's `plugin.json` on GitHub, nothing sent. When there is one, her hover card says so and the settings window offers it. With no value, it also says her version. |
 | `/mascot reset` | Every setting back to its default. |
 
 With no value, each command says what the setting is now. The file can be
@@ -79,7 +90,9 @@ The settings window has the same settings in the character's own colors
 (Miku's teal and pink; `frames/<character>/theme.json`): her character (a
 tile for each, in her colors, and "Remember for this project"), her size
 with a preview of her at it, calm mode, the aura's three thresholds on one
-track, and the beam. A change is saved at once, and a change made elsewhere
+track, the beam, and updates (her version, what is new in it, the daily
+check, and an Update button when a newer version is out, following the
+update as it runs). A change is saved at once, and a change made elsewhere
 (a command, the file) shows in it within a second. Running `/mascot
 settings` again brings it forward; run from another session, the window
 reopens for that one (its character picks are that session's), where it

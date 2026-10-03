@@ -15,12 +15,18 @@ reads (remembered for the project, or for this session alone), and the
 window takes on her colors at once; it follows the session file's
 `character` too (/mascot character), every `POLL_MS`.
 
+Its Updates card shows her version and what is new in it (whatsnew.json),
+turns the daily check for a newer one on and off (`checkUpdates`; turning
+it on says `check`, so the mod looks at once), and, when the mod has found
+one (the session file's `update`), offers it: a press says `update`, and
+the mod's progress shows as it writes it.
+
 Everything in it is drawn with Pillow onto one Tk canvas, anime-sticker
 style like her symbols (soft edges, white borders, glows): a header with
 her portrait, the character card, then a card each for her size, calm
-mode, the aura and the beam, with widgets of its own (`Slider`, `Tiers`,
-`Toggle`...). Layout is in logical px (`WIDTH` wide), times the display's
-scale.
+mode, the aura, the beam and updates, with widgets of its own (`Slider`,
+`Tiers`, `Toggle`...). Layout is in logical px (`WIDTH` wide), times the
+display's scale.
 """
 
 import colorsys
@@ -58,6 +64,7 @@ DISABLED = 0.4  # a widget that does nothing now is drawn this faint
 
 # The ranges the sliders show; the settings take more (by hand or /mascot),
 # shown at the slider's end.
+UPDATES = 100  # the updates card's height
 AURA_SHOWN = (0, 1_000_000, 10_000)  # low, high, step (and the least gap)
 BEAM_SHOWN = (1, 30, 1)
 SIZE_STEP = 10
@@ -221,6 +228,31 @@ def text(out, xy, words, kind, px, fill, anchor="la", stroke=0, stroke_fill=None
                              anchor=anchor, stroke_width=round(stroke), stroke_fill=stroke_fill)
 
 
+def fit(words, kind, px, width):
+    """`words`, cut short with an ellipsis to fit `width` px."""
+    if text_width(words, kind, px) <= width:
+        return words
+    while words and text_width(words + "…", kind, px) > width:
+        words = words[:-1]
+    return words.rstrip() + "…"
+
+
+def wrap(words, kind, px, width, most):
+    """`words` in lines that fit `width` px, at `most` lines (the last cut short)."""
+    lines, line = [], ""
+    for word in words.split():
+        if line and text_width(f"{line} {word}", kind, px) > width:
+            lines.append(line)
+            line = word
+        else:
+            line = f"{line} {word}".strip()
+    if line:
+        lines.append(line)
+    if len(lines) > most:
+        lines = lines[:most - 1] + [fit(" ".join(lines[most - 1:]) + " …", kind, px, width)]
+    return [fit(line, kind, px, width) for line in lines]
+
+
 def text_width(words, kind, px):
     return font(kind, px, words).getlength(words)
 
@@ -298,6 +330,20 @@ class Label(Widget):
     def draw(self, img):
         x = {"l": 0, "m": img.width / 2, "r": img.width}[self.anchor[0]]
         text(img, (x, img.height / 2), self.words(), self.kind, self.px, self.color(), self.anchor[0] + "m")
+
+
+class Note(Label):
+    """Text that changes, wrapped onto as many lines as its box holds
+    (`lead` px apart), the last cut short with an ellipsis."""
+
+    def __init__(self, app, box, words, px, color, lead):
+        super().__init__(app, box, words, "regular", px, color)
+        self.lead = lead
+
+    def draw(self, img):
+        lines = wrap(self.words(), self.kind, self.px, img.width, max(1, int(img.height // self.lead)))
+        for i, line in enumerate(lines):
+            text(img, (0, self.lead * (i + 0.5)), line, self.kind, self.px, self.color(), "lm")
 
 
 class Slider(Widget):
@@ -555,6 +601,23 @@ class Button(Widget):
             self.action()
 
 
+class Offer(Button):
+    """A button there only while `words()` says something: the update's."""
+
+    def __init__(self, app, box, words, action):
+        super().__init__(app, box, None, action)
+        self.offer = words
+
+    @property
+    def enabled(self):
+        return bool(self.offer())
+
+    def draw(self, img):
+        self.words = self.offer()
+        if self.words:
+            super().draw(img)
+
+
 class Link(Widget):
     def __init__(self, app, box, words, action):
         super().__init__(app, box)
@@ -695,6 +758,14 @@ class App:
         self.last_aura = self.prefs.aura or cfg.DEFAULTS.aura
         self.last_minutes = self.prefs.beamAfter or cfg.DEFAULTS.beamAfter
         self.raise_mtime = mtime_of(os.path.join(state_dir, RAISE_FILE))
+        # Her version and its updates (the session file's `update`), what is
+        # new in it, and an update asked for here until the mod answers.
+        plugin_root = os.path.dirname(self.frames_root)
+        manifest = read_json(os.path.join(plugin_root, ".claude-plugin", "plugin.json")) or {}
+        self.release = {"version": manifest.get("version") if isinstance(manifest.get("version"), str) else ""}
+        self.notes = read_json(os.path.join(plugin_root, "whatsnew.json")) or {}
+        self.asked = False
+        self.read_release()
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -769,14 +840,72 @@ class App:
         self.grabbed = None
         self.build()
 
-    def follow_session(self):
-        """The session's character changed elsewhere (/mascot character)."""
+    def session_data(self):
         if not self.session:
-            return
-        data = read_json(os.path.join(self.state_dir, "sessions", f"{self.session}.json")) or {}
+            return {}
+        return read_json(os.path.join(self.state_dir, "sessions", f"{self.session}.json")) or {}
+
+    def follow_session(self):
+        """The session's character changed elsewhere (/mascot character),
+        or its update moved on."""
+        data = self.session_data()
         name = data.get("character")
         if isinstance(name, str) and name != self.character and any(n == name for n, _, _ in self.cast):
             self.use(name)
+        if self.read_release(data):
+            self.refresh({"release"})
+
+    # ---- her version and updates
+
+    def read_release(self, data=None):
+        """Takes on the session file's `update`; whether it changed."""
+        update = (data if data is not None else self.session_data()).get("update")
+        if not isinstance(update, dict) or not isinstance(update.get("version"), str):
+            return False
+        release = {k: update[k] for k in ("version", "latest", "state", "message") if isinstance(update.get(k), str)}
+        if release.get("state") in ("updating", "updated", "failed"):
+            self.asked = False  # the mod has answered
+        changed = release != self.release
+        self.release = release
+        return changed
+
+    def release_offer(self):
+        """The update button's words, when there is an update to offer."""
+        r = self.release
+        if self.asked or r.get("state") in ("updating", "updated"):
+            return ""
+        if r.get("state") == "failed":
+            return "Try again"
+        return f"Update to v{r['latest']}" if r.get("latest") else ""
+
+    def release_lines(self):
+        """The updates card's headline and the line under it."""
+        r, version = self.release, self.release.get("version", "")
+        state = "updating" if self.asked else r.get("state")
+        if state == "updating":
+            return "Updating…", "She is fetching her new version."
+        if state == "updated":
+            return "Updated!", r.get("message", "")
+        if state == "failed":
+            return "The update failed", r.get("message", "")
+        if r.get("latest"):
+            return f"v{r['latest']} is out!", f"She is v{version} now."
+        notes = self.notes.get(version)
+        if isinstance(notes, list) and notes and isinstance(notes[0], str):
+            return f"New in v{version}", notes[0]
+        return (f"v{version}" if version else "Her version"), (
+            "She is up to date." if self.prefs.checkUpdates and r.get("version") else "")
+
+    def ask_update(self):
+        say("update")
+        self.asked = True
+        self.refresh({"release"})
+
+    def set_check_updates(self, on):
+        self.change(checkUpdates=on)
+        if on:
+            self.flush()  # saved before the mod reads it
+            say("check")
 
     # ---- settings
 
@@ -843,7 +972,7 @@ class App:
         W, M = WIDTH, 18
         col = (W - 3 * M) / 2
         CAST = 100  # the character card's height
-        H = 528 + CAST + 14
+        H = 528 + CAST + 14 + UPDATES + 14
         self.bg = Image.new("RGBA", (round(W * u), round(H * u)), t.paper + (255,))
         self.portrait = portrait(self.art)
         draw_header(self.bg, t, u, self.portrait)
@@ -907,8 +1036,26 @@ class App:
         self.add(Toggle(self, box(x + 16, y + 128, col - 32, 26), lambda: self.prefs.beamForAgents,
                         lambda v: self.change(beamForAgents=v), "When agents helped"), "beamForAgents")
 
+        # Updates
+        uy = top + 330 + 14
+        x, y = card(M, uy, W - 2 * M, UPDATES, "アップデート", "Updates", [])
+        self.add(Label(self, box(x + 16, y + 40, 330, 18), lambda: (
+            "Once a day, a look at her newest version on GitHub." if self.prefs.checkUpdates
+            else "Off: she never goes online. /mascot update works anyway."),
+            "regular", 12 * u, lambda: t.muted), "checkUpdates")
+        self.add(Toggle(self, box(x + 16, y + 64, 330, 26), lambda: self.prefs.checkUpdates, self.set_check_updates,
+                        "Look for new versions"), "checkUpdates")
+        panel = x + 380
+        pw = W - 2 * M - 380 - 16
+        self.add(Label(self, box(panel, y + 12, pw - 176, 30), lambda: self.release_lines()[0],
+                       "bold", 15 * u, lambda: t.accentDeep if self.release_offer() else t.primaryDeep), "release",
+                 "checkUpdates")
+        self.add(Note(self, box(panel, y + 46, pw, 40), lambda: self.release_lines()[1],
+                      12 * u, lambda: t.muted, 18 * u), "release", "checkUpdates")
+        self.add(Offer(self, box(panel + pw - 168, y + 12, 168, 32), self.release_offer, self.ask_update), "release")
+
         # Footer
-        fy = top + 330 + 14
+        fy = uy + UPDATES + 14
         self.add(Label(self, box(M + 4, fy, 400, 32), lambda: self.problem or "Every mascot follows these at once.",
                        "regular", 12 * u, lambda: t.accentDeep if self.problem else t.muted), "problem")
         self.add(Button(self, box(W - M - 104, fy, 104, 32), "Reset all", self.reset))

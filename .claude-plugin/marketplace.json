@@ -1,0 +1,16 @@
+{
+  "name": "cc-mascot",
+  "owner": { "name": "desuqcafe", "url": "https://github.com/desuqcafe" },
+  "metadata": {
+    "description": "Anime desktop mascots for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "mascot",
+      "source": "./mascot",
+      "description": "A desktop mascot overlay that reacts to turns, tool calls and subagents",
+      "category": "fun",
+      "homepage": "https://github.com/desuqcafe/cc-mascot"
+    }
+  ]
+}

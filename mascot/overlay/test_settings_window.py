@@ -78,10 +78,10 @@ class Window(unittest.TestCase):
         return [w for w in self.app.widgets if isinstance(w, kind)][n]
 
     def test_it_draws_at_the_displays_scale(self):
-        self.assertEqual(self.app.image().size, (sw.WIDTH, 642))
+        self.assertEqual(self.app.image().size, (sw.WIDTH, 756))
         big = sw.App(self.state, MIKU, show=False, scale=1.5)
         try:
-            self.assertEqual(big.image().size, (round(sw.WIDTH * 1.5), 963))
+            self.assertEqual(big.image().size, (round(sw.WIDTH * 1.5), 1134))
         finally:
             big.root.destroy()
 
@@ -163,7 +163,7 @@ class Window(unittest.TestCase):
         cfg.save(self.app.path, size=300, calm=True)
         self.app.poll()
         self.assertEqual((self.app.prefs.size, self.app.prefs.calm), (300, True))
-        click(self.app, self.widget(sw.Button))
+        click(self.app, next(w for w in self.app.widgets if isinstance(w, sw.Button) and w.words == "Reset all"))
         self.assertEqual(saved(self.app), {})
 
     def test_a_change_made_elsewhere_shows(self):
@@ -230,6 +230,72 @@ class Character(unittest.TestCase):
         self.app.poll()
         self.assertEqual(self.app.character, "yunseul")
         self.assertEqual(self.said, [])  # the mod knows already
+
+
+class Updates(unittest.TestCase):
+    """The updates card: her version, what is new, the daily check, the update."""
+
+    def setUp(self):
+        self.state = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.state, "sessions"))
+        self.said = []
+        self.say, sw.say = sw.say, self.said.append
+        self.app = sw.App(self.state, MIKU, show=False, scale=1.0, session="s1", project="webapp")
+
+    def tearDown(self):
+        sw.say = self.say
+        self.app.root.destroy()
+
+    def session(self, update):
+        with open(os.path.join(self.state, "sessions", "s1.json"), "w", encoding="utf-8") as f:
+            json.dump({"frame": "idle", "update": update}, f)
+        self.app.poll()
+
+    def offer(self):
+        return next(w for w in self.app.widgets if isinstance(w, sw.Offer))
+
+    def test_it_shows_her_version_and_whats_new(self):
+        version = self.app.release["version"]
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")  # from her plugin.json
+        headline, note = self.app.release_lines()
+        self.assertEqual(headline, f"New in v{version}")
+        self.assertTrue(note)
+        self.assertFalse(self.offer().enabled)  # nothing to offer
+
+    def test_turning_the_check_on_asks_the_mod_to_look_now(self):
+        toggle = [w for w in self.app.widgets if isinstance(w, sw.Toggle)][4]
+        click(self.app, toggle)
+        self.assertEqual(saved(self.app), {"checkUpdates": True})
+        self.assertEqual(self.said, ["check"])
+        click(self.app, toggle)
+        self.assertEqual(saved(self.app), {})
+        self.assertEqual(self.said, ["check"])  # off: nothing to look at
+
+    def test_a_newer_version_is_offered_and_its_update_followed(self):
+        self.session({"version": "0.15.0", "route": "marketplace", "latest": "0.16.0"})
+        self.assertEqual(self.app.release_lines()[0], "v0.16.0 is out!")
+        self.assertTrue(self.offer().enabled)
+        self.assertEqual(self.app.release_offer(), "Update to v0.16.0")
+        click(self.app, self.offer())
+        self.assertEqual(self.said, ["update"])
+        self.assertEqual(self.app.release_lines()[0], "Updating…")
+        self.assertFalse(self.offer().enabled)  # once
+
+        self.session({"version": "0.15.0", "route": "marketplace", "latest": "0.16.0", "state": "updated",
+                      "message": "Type /reload-plugins to meet her new version."})
+        self.assertEqual(self.app.release_lines(), ("Updated!", "Type /reload-plugins to meet her new version."))
+        self.assertFalse(self.offer().enabled)
+
+    def test_a_failed_update_can_be_tried_again(self):
+        self.session({"version": "0.15.0", "route": "clone", "state": "failed", "message": "fatal: no"})
+        self.assertEqual(self.app.release_lines(), ("The update failed", "fatal: no"))
+        self.assertEqual(self.app.release_offer(), "Try again")
+
+    def test_long_words_wrap_and_are_cut_to_fit(self):
+        lines = sw.wrap("one two three four five six seven eight nine ten", "regular", 12, 80, 2)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[-1].endswith("…"))
+        self.assertTrue(all(sw.text_width(line, "regular", 12) <= 80 for line in lines))
 
 
 class OneWindow(unittest.TestCase):

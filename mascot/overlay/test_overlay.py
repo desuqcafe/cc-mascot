@@ -376,17 +376,32 @@ class Card(unittest.TestCase):
         self.assertTrue(tag.endswith("… ·1"))
 
 
+class NewVersionHint(unittest.TestCase):
+    def test_the_card_says_a_newer_version_is_out(self):
+        _, lines = overlay.card_lines("idle", {"newVersion": "0.16.0"}, NOW_MS)
+        self.assertIn("v0.16.0 is out \u00b7 /mascot update", lines)
+        _, lines = overlay.card_lines("idle", {"newVersion": "soon"}, NOW_MS)
+        self.assertFalse(any("is out" in str(line) for line in lines))
+
+
 class SessionFile(unittest.TestCase):
     def setUp(self):
         use_state_dir()
 
     def test_reads_frame_info_and_visibility(self):
         write(overlay.SESSION_PATH, {"frame": "waiting", "info": {"tool": "Bash"}, "visible": False, "visibleAt": 5})
-        self.assertEqual(overlay.read_state(), ("waiting", {"tool": "Bash"}, (False, 5), False, 0, None))
+        self.assertEqual(overlay.read_state(), ("waiting", {"tool": "Bash"}, (False, 5), False, 0, None, None))
 
     def test_an_unknown_frame_is_idle_and_no_choice_is_none(self):
         write(overlay.SESSION_PATH, {"frame": "dancing"})
-        self.assertEqual(overlay.read_state(), ("idle", {}, None, False, 0, None))
+        self.assertEqual(overlay.read_state(), ("idle", {}, None, False, 0, None, None))
+
+    def test_a_new_version_to_celebrate(self):
+        write(overlay.SESSION_PATH, {"frame": "idle", "update": {"version": "0.15.0", "route": "clone", "celebrate": 9, "from": "0.14.1"}})
+        self.assertEqual(overlay.read_state().celebrate, (9, "0.15.0"))
+        for update in ({"version": "0.15.0"}, {"version": "soon", "celebrate": 9}, {"version": "0.15.0", "celebrate": True}, "yes"):
+            write(overlay.SESSION_PATH, {"frame": "idle", "update": update})
+            self.assertIsNone(overlay.read_state().celebrate)
 
     def test_a_missing_or_half_written_file_is_none(self):
         self.assertIsNone(overlay.read_state())

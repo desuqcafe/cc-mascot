@@ -148,26 +148,58 @@ You need **Windows** and **Python 3 with Pillow** (`pip install pillow`).
 `pythonw` must be on your `PATH` (the Microsoft Store Python and the
 python.org installer with "Add to PATH" both do that).
 
-1. Clone this repository:
+1. In Claude Code, add this repository as a plugin marketplace and install
+   the plugin:
 
    ```
-   git clone https://github.com/desuqcafe/cc-mascot.git
+   /plugin marketplace add desuqcafe/cc-mascot
+   /plugin install mascot@cc-mascot
    ```
 
-2. Load the `mascot` folder as a Claude Code plugin. For every session, add it
-   to `~/.claude/settings.json`:
+   (Or from a terminal: `claude plugin marketplace add desuqcafe/cc-mascot`,
+   then `claude plugin install mascot@cc-mascot`.)
 
-   ```json
-   {
-     "env": {
-       "CLAUDE_CODE_PLUGIN_DIRS": "C:\\path\\to\\cc-mascot\\mascot"
-     }
-   }
-   ```
+2. Start a new session (or type `/reload-plugins`). She beams in at the
+   bottom-right of your main display.
 
-   Or try it in one session: `claude --plugin-dir C:\path\to\cc-mascot\mascot`
+To get new versions on their own, turn on auto-update for the marketplace:
+`/plugin`, the **Marketplaces** tab, `cc-mascot`, **Enable auto-update**.
 
-3. Start Claude Code. She beams in at the bottom-right of your main display.
+<details>
+<summary>Or from a clone</summary>
+
+```
+git clone https://github.com/desuqcafe/cc-mascot.git
+```
+
+Then load its `mascot` folder for every session, in `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_PLUGIN_DIRS": "C:\\path\\to\\cc-mascot\\mascot"
+  }
+}
+```
+
+Or for one session: `claude --plugin-dir C:\path\to\cc-mascot\mascot`.
+Updating a clone is a `git pull` (`/mascot update` does it for you).
+
+</details>
+
+## Updates
+
+A new version greets you: the first time it runs, she holds up a "NEW!"
+banner with its version (Yunseul's has bat wings) and Claude Code shows
+what is new in it.
+
+To hear about one before you have it, turn on **Look for new versions** in
+the settings window (or `/mascot updates on`). It is off by default; on, the
+plugin reads this repository's version number once a day, and when there is
+a newer one, her hover card says so and the window offers an **Update**
+button. The button, or `/mascot update`, updates her the way she was
+installed (`claude plugin update` for the marketplace, `git pull` for a
+clone); type `/reload-plugins` afterwards to meet her new version.
 
 ## Commands
 
@@ -185,11 +217,13 @@ python.org installer with "Add to PATH" both do that).
 | `/mascot aura [A B C\|off]` | When her aura's three levels start (default `300k 400k 500k`), or no aura. |
 | `/mascot beam after [MINUTES\|never]` | How long a job runs before it ends in the beam (default 2). |
 | `/mascot beam agents [on\|off]` | Whether jobs with subagents or background agents end in it too. |
+| `/mascot updates [on\|off]` | Look for a new version once a day (off by default). |
+| `/mascot update` | Update her to the newest version. |
 | `/mascot reset` | Every setting back to its default. |
 
 ## Settings
 
-<img src="docs/media/settings.png" alt="The settings window in Miku's teal and pink: her character, size with a preview of her, calm mode, the aura's thresholds and the beam" width="400"> <img src="docs/media/yunseul/settings.png" alt="The same window in Yunseul's crimson and lilac, with her picked" width="400">
+<img src="docs/media/settings.png" alt="The settings window in Miku's teal and pink: her character, size with a preview of her, calm mode, the aura's thresholds, the beam and updates" width="400"> <img src="docs/media/yunseul/settings.png" alt="The same window in Yunseul's crimson and lilac, with her picked" width="400">
 
 The window picks her character too: click a character to switch this
 session's mascot. With "Remember for this project" on (the default), the
@@ -203,8 +237,10 @@ mascot at once, live, from the window, the commands above, or
 
 ## Good to know
 
-- Nothing leaves your machine: no network, no API calls. The plugin writes
-  a small status file per session and the overlay reads it.
+- Nothing leaves your machine: no API calls, and no network at all unless
+  you turn on **Look for new versions** (then one read of this repository's
+  version number a day, nothing sent) or ask for an update. The plugin
+  writes a small status file per session and the overlay reads it.
 - She can never break a session: the plugin only watches events and never
   changes what Claude does.
 - A hidden mascot uses about 20 MB of memory; a shown one about 125 MB and a
