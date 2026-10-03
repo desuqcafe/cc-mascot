@@ -44,9 +44,9 @@ past her window's usual edges (effects.beamed), so for its first seconds
 the window is effects.BEAM_PAD larger on every side. So is it while a new
 version's banner plays (effects.updated): once, when the mod says a newer
 version than the last one run has loaded (the session file's `update`).
-When a round of work ends while you are elsewhere, she sends magic to your
-pointer, on any display (the session file's `call`, magic.py), in a window
-of its own that clicks pass through; hidden, she sends it all the same.
+When a long enough round of work ends, she sends magic to your pointer, on
+any display (the session file's `call`, magic.py), in a window of its own
+that clicks pass through; hidden, she sends it all the same.
 
 The overlay runs while its session does, shown or hidden, and says on stdout
 what was chosen in its window (`hidden`). Its art is loaded only while it is
@@ -1195,7 +1195,7 @@ def run_window(parent, starter):
         "celebration": None,
         # Her call to the pointer (magic.py): the last word of one seen
         # (epoch ms; one already in the file at the start is old), and one
-        # waiting for you, {test, seen (monotonic s)}.
+        # waiting to go, {test, seen (monotonic s)}.
         "called": first.call[0] if first.call else 0,
         "call": None,
     }
@@ -1519,7 +1519,7 @@ def run_window(parent, starter):
                     if state["shown"] and state["act"] is None:
                         play("channel")
                 if current.call and current.call[0] != state["called"]:
-                    # A round is over: her call, once you are around.
+                    # A round is over: her call, as she cheers.
                     state["called"] = current.call[0]
                     state["call"] = {"test": current.call[1], "seen": time.monotonic()}
                 if current.celebrate and current.celebrate[0] != state["celebrated"]:
@@ -1543,30 +1543,25 @@ def run_window(parent, starter):
             root.after(POLL_MS, poll)
 
     def answer_call():
-        """Sends a waiting call once you are around and not already looking
-        at her session (magic.verdict); a new round of work, or her being
-        in your hand, drops it. It leaves her as she fires her finish."""
+        """Sends a call as she fires her finish; while a fullscreen game or
+        a presentation holds notifications back (not for a test), it waits.
+        A new round of work, or her being in your hand, drops a waiting one:
+        you are back."""
         call = state["call"]
         if call is None:
             return
         if state["ending"] or (not call["test"] and (state["mood"] in ("thinking", "working") or state["drag"])):
             state["call"] = None
             return
-        if time.monotonic() - call["seen"] < fx.CHARGE_S:
-            return
-        answer = magic.verdict(call["test"], magic.idle_s() >= magic.AWAY_S, magic.notifications_held(),
-                               magic.pointer(), lambda: magic.is_watching(magic.foreground_pid(), parent, process_table(),
-                                                                          magic.foreground_title()))
-        if answer == "wait":
+        if time.monotonic() - call["seen"] < fx.CHARGE_S or (not call["test"] and magic.notifications_held()):
             return
         state["call"] = None
-        if answer == "go":
-            start = None
-            if state["shown"] and art.frames.get("idle"):
-                width, height = art.size()
-                x, y = fx.magic_from(width, height)
-                start = (state["pos"]["x"] + x, state["pos"]["y"] + y)
-            calls.send(start, sprites or fx.build_sprites(HEIGHT), calm())
+        start = None
+        if state["shown"] and art.frames.get("idle"):
+            width, height = art.size()
+            x, y = fx.magic_from(width, height)
+            start = (state["pos"]["x"] + x, state["pos"]["y"] + y)
+        calls.send(start, sprites or fx.build_sprites(HEIGHT), calm())
 
     def draw_card():
         if not hover["shown"]:

@@ -1,5 +1,4 @@
-"""Her call to the pointer: when it goes, whether you are looking, and how
-it flies (effects.magic).
+"""Her call to the pointer: when it waits, and how it flies (effects.magic).
 
     python -m unittest discover -s overlay -p "test_*.py"
 """
@@ -13,78 +12,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import effects as fx  # noqa: E402
 import magic  # noqa: E402
 
-# A terminal holding a shell holding Claude Code (with a tool it runs), and
-# an editor elsewhere: {pid: (parent, exe)}.
-TABLE = {
-    10: (1, "WindowsTerminal.exe"),
-    20: (10, "pwsh.exe"),
-    30: (20, "claude.exe"),
-    31: (30, "claude.exe"),  # one of its own helpers, not another session
-    32: (30, "bash.exe"),
-    50: (1, "Code.exe"),
-}
+class Calling(unittest.TestCase):
+    def test_it_waits_only_for_a_game_or_a_presentation(self):
+        self.assertEqual(magic.HELD_STATES, (3, 4))  # not QUNS_BUSY: a fullscreen video shows her
 
-
-class Verdict(unittest.TestCase):
-    def verdict(self, test=False, away=False, held=False, at=(5, 5), looking=False):
-        asked = []
-
-        def look():
-            asked.append(True)
-            return looking
-
-        return magic.verdict(test, away, held, at, look), bool(asked)
-
-    def test_it_goes_when_you_are_elsewhere(self):
-        self.assertEqual(self.verdict(), ("go", True))
-
-    def test_it_waits_for_you_and_for_the_pointer(self):
-        self.assertEqual(self.verdict(away=True), ("wait", False))
-        self.assertEqual(self.verdict(at=None), ("wait", False))
-        self.assertEqual(self.verdict(held=True), ("wait", True))  # a game: later, unless you are looking
-
-    def test_looking_at_her_session_drops_it(self):
-        self.assertEqual(self.verdict(looking=True), ("drop", True))
-        self.assertEqual(self.verdict(looking=True, held=True), ("drop", True))
-
-    def test_a_test_goes_as_soon_as_the_pointer_shows(self):
-        self.assertEqual(self.verdict(test=True, away=True, held=True, looking=True), ("go", False))
-        self.assertEqual(self.verdict(test=True, at=None), ("wait", False))
-
-
-class Watching(unittest.TestCase):
-    def test_her_terminal_in_front_is_looking(self):
-        self.assertTrue(magic.is_watching(10, 30, TABLE))
-        self.assertTrue(magic.is_watching(20, 30, TABLE))
-
-    def test_another_window_in_front_is_not(self):
-        self.assertFalse(magic.is_watching(50, 30, TABLE))
-        self.assertFalse(magic.is_watching(0, 30, TABLE))
-        self.assertFalse(magic.is_watching(32, 30, TABLE))  # under her, not above
-
-    def test_a_terminal_with_other_sessions_goes_by_its_tabs_title(self):
-        table = {**TABLE, 40: (10, "pwsh.exe"), 41: (40, "claude.exe")}
-        tabs = {30: "◐ Fix the build", 41: "✳ Write the docs"}
-
-        def titles_of(pids):
-            self.assertEqual(sorted(pids), [30, 41])
-            return tabs
-
-        # The spinner leading a working session's title turns between reads.
-        self.assertTrue(magic.is_watching(10, 30, table, "◑ Fix the build", titles_of))
-        self.assertFalse(magic.is_watching(10, 30, table, "✳ Write the docs", titles_of))
-        self.assertFalse(magic.is_watching(10, 30, table, "", titles_of))
-        self.assertFalse(magic.is_watching(10, 30, table, "Fix the build", lambda pids: {}))  # unreadable: she calls
-        tabs[41] = "✳ Fix the build"
-        self.assertFalse(magic.is_watching(10, 30, table, "Fix the build", titles_of))  # two alike: no telling
-        self.assertTrue(magic.is_watching(20, 30, table))  # her own shell's window is hers alone
-
-    def test_console_titles_reads_a_real_console(self):
-        self.assertEqual(magic.console_titles([]), {})
-        self.assertEqual(magic.console_titles([4]), {})  # the System process has no console
-
-    def test_lineage_stops_at_a_loop(self):
-        self.assertEqual(magic.lineage(1, {1: (2, "a"), 2: (1, "b")}), [1, 2])
+    def test_the_pointer_is_read_shown_or_hidden(self):
+        at = magic.pointer()
+        self.assertEqual(len(at), 2)
+        self.assertTrue(all(isinstance(v, int) for v in at))
 
 
 class Flight(unittest.TestCase):

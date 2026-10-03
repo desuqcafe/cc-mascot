@@ -1053,7 +1053,7 @@ class App:
         # Cursor magic
         my = top + 330 + 14
         x, y = card(M, my, W - 2 * M, MAGIC, "まほう", "Cursor magic",
-                    ["When a round of work ends while you are elsewhere,", "she sends magic to your pointer, on any display."])
+                    ["When a round of work ends, she sends magic", "to your pointer, on any display."])
         panel = x + 380
         pw = W - 2 * M - 380 - 16
 

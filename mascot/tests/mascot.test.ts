@@ -735,7 +735,7 @@ test("/mascot size, calm, aura and beam change every mascot's settings", async (
   expect((await mascot($, 'beam agents off')).text).toContain('only when long')
   expect((await mascot($, 'magic after')).text).toBe('No cursor magic. /mascot magic after <minutes>|never|default.')
   expect((await mascot($, 'magic after 5min')).text).toBe(
-    'Rounds of work of 5 min or more send magic to your pointer when you are elsewhere.',
+    'Rounds of work of 5 min or more send magic to your pointer.',
   )
   expect((await mascot($, 'magic after 500')).text).toContain('Magic after takes minutes (0 to 120)')
   expect(disk.settings()).toEqual({

@@ -1109,8 +1109,8 @@ def recoil(frame, age):
     return squash(frame, age - fire) if age >= fire else frame
 
 
-# Her call (the `magicAfter` setting): a round of work over while you are
-# elsewhere, she sends magic to your pointer, whichever display it is on. A
+# Her call (the `magicAfter` setting): a long enough round of work over,
+# she sends magic to your pointer, whichever display it is on. A
 # comet leaves her heart hands trailing sparkles and notes, and flies on an
 # arc to the pointer, homing in as it moves; it bursts there (a flash, a
 # ring of stars), then two notes and a heart circle the pointer, following

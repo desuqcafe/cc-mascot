@@ -39,8 +39,8 @@ export type MascotSessionFile = {
 /**
  * Her call to the pointer: a round of work ended (`at`, epoch ms) that
  * lasted the `magicAfter` setting's minutes. The overlay sends magic to the
- * pointer once the person is around and not already looking at this
- * session; `test` (/mascot magic) sends it as soon as the pointer shows.
+ * pointer at once, waiting only while a fullscreen game or a presentation
+ * holds notifications back; `test` (/mascot magic) does not wait even then.
  */
 export type MascotCall = { at: number; test?: true }
 
@@ -73,7 +73,7 @@ export type MascotUpdate = {
  * before it ends in the beam (1-120), or false for never (2);
  * `beamForAgents` a round that used agents ends in it too (true);
  * `magicAfter` the minutes a round of work lasts before its end sends magic
- * to the pointer, when the person is elsewhere (0-120: 0 every round), or
+ * to the pointer (0-120: 0 every round), or
  * false for never (false); `checkUpdates` look for a newer release on GitHub once a day (false).
  */
 export type MascotSettings = {

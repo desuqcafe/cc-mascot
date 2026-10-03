@@ -34,12 +34,11 @@ A tag under her feet names the session's project (numbered, `app ·1`,
   as you move it. It bursts there, then two notes and a heart circle the
   pointer, following it, until you click (or 6 s). Hidden, she sends it
   all the same: sparkles gather at the pointer.
-  - She sends it only when you are elsewhere. If her session's terminal is
-    the window in front, it is dropped. When that terminal holds other
-    sessions too, it is dropped only when the window's title is her tab's.
-  - Away (no input for 20 s), she waits until you are back. She also waits
-    while Windows holds notifications back (a fullscreen game or video, a
-    presentation) and while the pointer is hidden.
+  - It goes at once, whatever window is in front and however long since
+    you touched the mouse: neither says where you are looking (a video on
+    one display, the terminal active on the other). It waits only while a
+    game runs in exclusive fullscreen or Windows is in presentation mode.
+    A pointer an app hides (a playing video) still gets it.
   - It flies in a window of its own that clicks pass through and that never
     takes the focus.
   - `/mascot magic` sends one now, to try it (so does the settings window's
@@ -96,7 +95,7 @@ in `~/.claude/mascot/settings.json`, which holds only what you changed.
 | `/mascot aura [A B C\|off\|default]` | The context at which her aura's three levels start, going up (`300k 400k 500k` by default; `1.2M` works too), or no aura. |
 | `/mascot beam after [MINUTES\|never\|default]` | How long a round of work lasts before it ends in the beam instead of happy (2 minutes; up to 120), or never. |
 | `/mascot beam agents [on\|off]` | Whether a round that used subagents or background agents ends in the beam too (on). |
-| `/mascot magic after [MINUTES\|never\|default]` | How long a round of work lasts before its end sends magic to your pointer when you are elsewhere (0 for every round; up to 120), or never (the default). |
+| `/mascot magic after [MINUTES\|never\|default]` | How long a round of work lasts before its end sends magic to your pointer (0 for every round; up to 120), or never (the default). |
 | `/mascot updates [on\|off]` | Look for a newer version once a day (off): one read of this plugin's `plugin.json` on GitHub, nothing sent. When there is one, her hover card says so and the settings window offers it. With no value, it also says her version. |
 | `/mascot reset` | Every setting back to its default. |
 

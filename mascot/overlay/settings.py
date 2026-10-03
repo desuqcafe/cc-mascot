@@ -14,8 +14,8 @@ one, so a slip in the file never breaks a mascot:
     beamForAgents  a round that used subagents or background agents ends in
                    the beam too (true)
     magicAfter     minutes a round of work lasts before its end sends magic
-                   to your pointer, when you are elsewhere, MAGIC_RANGE (0:
-                   every round); false: never (false)
+                   to your pointer, MAGIC_RANGE (0: every round); false:
+                   never (false)
     checkUpdates   the mod looks for a newer release on GitHub once a day
                    (false: the mascot never goes online)
 

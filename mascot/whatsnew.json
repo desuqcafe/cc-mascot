@@ -1,7 +1,7 @@
 {
   "0.16.0": [
     "Cursor magic: turn it on here, and a long job ends with her sending magic to your pointer.",
-    "She waits until you are back, and stays quiet while you are looking at her session. Try it: /mascot magic."
+    "Clicks pass through it, and it never takes the focus. Try it: /mascot magic."
   ],
   "0.15.1": [
     "She stays on top: when Windows lets a window slip above her, she is back in front within a second."

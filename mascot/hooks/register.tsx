@@ -17,7 +17,7 @@ const HOLD_MS = 3000
 // setting's minutes or more, or one that used subagents or background agents
 // (`beamForAgents`), ends in her big finish, the beam, held this long,
 // instead of happy. One of the `magicAfter` setting's minutes or more ends
-// in her call too: magic sent to the pointer, when the person is elsewhere.
+// in her call too: magic sent to the pointer.
 const BEAM_MS = 3600
 // After the last subagent ends, how long to wait for the main agent to pick
 // its results up before calling the work done.
@@ -790,8 +790,7 @@ const settle = async ($: EngineInterface) => {
 }
 
 // Sends her call to the pointer now (/mascot magic, the settings window's
-// button): a test, so the overlay does not wait for the person to be
-// elsewhere.
+// button): a test, so the overlay sends it even over a fullscreen game.
 const sendMagic = async ($: EngineInterface, test = false) => {
   call = { at: await $.clock.now(), ...(test ? { test: true as const } : {}) }
   await writeFile($)
@@ -833,7 +832,7 @@ const describe = {
   magicAfter: (s: Settings) =>
     s.magicAfter === false
       ? 'No cursor magic.'
-      : `Rounds of work of ${s.magicAfter} min or more send magic to your pointer when you are elsewhere.`,
+      : `Rounds of work of ${s.magicAfter} min or more send magic to your pointer.`,
   checkUpdates: (s: Settings) =>
     s.checkUpdates ? 'Looks for a new version once a day.' : 'Never goes online to look for a new version.',
 }

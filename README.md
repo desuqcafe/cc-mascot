@@ -67,11 +67,10 @@ whenever you like.
 Off by default. Turned on, a job that ran a while ends with her sending
 magic to your mouse pointer, wherever it is, even on another display: a
 star flies from her hands, bursts on the pointer, and notes and a heart
-circle it until you click. She only sends it when you're looking somewhere
-else, not at her session (her own tab, when your terminal has several).
-If you've stepped away, she waits until you're back. She also waits while a
-fullscreen game or presentation is on (anything Windows holds notifications
-back for). Clicks pass right through it, and it never takes the focus from
+circle it until you click. It goes whatever window is active, since that
+says nothing about where you're looking (a video on one display, the
+terminal on the other). It only waits while a fullscreen game or a
+presentation is on. Clicks pass right through it, and it never takes the focus from
 what you're typing in. Turn it on in the settings window, or with
 `/mascot magic after 1` (minutes; `0` for every job). `/mascot magic` sends
 one to try it.
@@ -239,7 +238,7 @@ clone); type `/reload-plugins` afterwards to meet her new version.
 | `/mascot beam after [MINUTES\|never]` | How long a job runs before it ends in the beam (default 2). |
 | `/mascot beam agents [on\|off]` | Whether jobs with subagents or background agents end in it too. |
 | `/mascot magic` | Send cursor magic to your pointer now, to try it. |
-| `/mascot magic after [MINUTES\|never]` | How long a job runs before its end sends magic to your pointer, when you're elsewhere (0 for every job; off by default). |
+| `/mascot magic after [MINUTES\|never]` | How long a job runs before its end sends magic to your pointer (0 for every job; off by default). |
 | `/mascot updates [on\|off]` | Look for a new version once a day (off by default). |
 | `/mascot update` | Update her to the newest version. |
 | `/mascot reset` | Every setting back to its default. |
