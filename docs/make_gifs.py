@@ -162,18 +162,31 @@ def status():
         save(f"status-{name}.gif", [flatten(im, 0.5, size) for im in images])
 
 
+def use_character(name):
+    """Draws `name` from now on: her frames, look and sprites."""
+    global FRAMES, SPRITES
+    FRAMES = os.path.join(MASCOT, "frames", name)
+    with open(os.path.join(FRAMES, THEME_FILE), encoding="utf-8") as f:
+        fx.use(fx.look_of(json.load(f)))
+    _frames.clear()
+    SPRITES = fx.build_sprites(HEIGHT)
+
+
 def social():
-    """GitHub's social preview (1280x640): the title over four of her moods.
-    Uploaded by hand: Settings, General, Social preview."""
+    """GitHub's social preview (1280x640): the title, teal into crimson,
+    over two of Miku's moods and two of Yunseul's. Uploaded by hand:
+    Settings, General, Social preview."""
     from PIL import ImageDraw, ImageFont
 
+    from settings_window import blend
+
     no_tag = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
-    shots = [
-        render("thinking", 101.3, 1.3, tag=no_tag),
-        render("working", 102.0, 2.0, tag=no_tag),
-        render("happy", 100.6, 0.6, tag=no_tag),
-        render("idle", 200.4, 5.4, status=fx.Status(2), tag=no_tag),
-    ]
+    shots = []
+    for name, moods in (("miku", [("thinking", 101.3, 1.3, fx.CALM), ("happy", 100.6, 0.6, fx.CALM)]),
+                        ("yunseul", [("working", 102.0, 2.0, fx.CALM), ("idle", 200.4, 5.4, fx.Status(2))])):
+        use_character(name)
+        shots += [render(mood, t, age, status=status, tag=no_tag) for mood, t, age, status in moods]
+    use_character(CHARACTER)
     card = Image.new("RGBA", (1280, 640), BACKDROP + (255,))
     scale = 0.9
     shots = [s.resize((round(s.width * scale), round(s.height * scale)), Image.LANCZOS) for s in shots]
@@ -182,11 +195,19 @@ def social():
     for s in shots:
         card.alpha_composite(s, (x, card.height - s.height - 8))
         x += s.width + gap
-    draw = ImageDraw.Draw(card)
+    # The title, from Miku's teal around the color wheel to Yunseul's crimson.
     title = ImageFont.truetype("segoeuib.ttf", 64)
+    mask = Image.new("L", card.size, 0)
+    ImageDraw.Draw(mask).text((card.width // 2, 70), "cc-mascot", font=title, fill=255, anchor="mm")
+    left, _, right, _ = mask.getbbox()
+    ramp = Image.new("RGBA", card.size)
+    for column in range(left, right):
+        color = blend((57, 197, 187), (202, 39, 57), (column - left) / max(1, right - left - 1))
+        ramp.paste(color + (255,), (column, 0, column + 1, card.height))
+    card.paste(ramp, (0, 0), mask)
     sub = ImageFont.truetype("segoeui.ttf", 30)
-    draw.text((card.width // 2, 70), "cc-mascot", font=title, fill=fx.MAIN, anchor="mm")
-    draw.text((card.width // 2, 132), "anime desktop mascots for Claude Code", font=sub, fill=(201, 209, 217), anchor="mm")
+    ImageDraw.Draw(card).text((card.width // 2, 132), "anime desktop mascots for Claude Code", font=sub,
+                              fill=(201, 209, 217), anchor="mm")
     path = os.path.join(OUT, "social-preview.png")
     card.convert("RGB").save(path, optimize=True)
     print(f"social-preview.png: {os.path.getsize(path) // 1024} KB")
