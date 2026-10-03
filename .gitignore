@@ -1,0 +1,15 @@
+# Written by Claude Code each time it loads the plugin
+mascot/.claude-plugin/types/
+
+__pycache__/
+*.pyc
+
+# Personal Claude Code settings (permissions) for this machine
+.claude/settings.local.json
+
+# The rig's tools, venv, layers and renders (rig/README.md sets them up)
+rig/*
+!rig/README.md
+!rig/animate.py
+!rig/contact_sheet.py
+!rig/poses.py

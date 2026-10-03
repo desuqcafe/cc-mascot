@@ -1,0 +1,42 @@
+{
+  "idle": {
+    "fps": 12,
+    "rigged": true
+  },
+  "thinking": {
+    "fps": 12,
+    "rigged": true
+  },
+  "working": {
+    "fps": 12,
+    "rigged": true
+  },
+  "waiting": {
+    "fps": 12,
+    "rigged": true
+  },
+  "held": {
+    "fps": 12,
+    "rigged": true
+  },
+  "beam": {
+    "fps": 12,
+    "rigged": true
+  },
+  "happy": {
+    "fps": 12,
+    "rigged": true
+  },
+  "worried": {
+    "fps": 12,
+    "rigged": true
+  },
+  "error": {
+    "fps": 12,
+    "rigged": true
+  },
+  "sleepy": {
+    "fps": 12,
+    "rigged": true
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "mascot",
+  "version": "0.14.1",
+  "author": { "name": "desuqcafe", "url": "https://github.com/desuqcafe" },
+  "repository": "https://github.com/desuqcafe/cc-mascot",
+  "license": "MIT",
+  "description": "A desktop mascot overlay that reacts to turns, tool calls and subagents",
+  "types": "./types/index.d.ts"
+}

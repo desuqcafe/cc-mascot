@@ -1,0 +1,41 @@
+{
+  "name": "Yunseul",
+  "subtitle": "윤슬의 설정",
+  "beam": "Love Bite",
+  "colors": {
+    "primary": "#CA2739",
+    "primaryDeep": "#8A1B2A",
+    "accent": "#9A7FB0",
+    "accentDeep": "#6B5482",
+    "hot": "#E8203C",
+    "paper": "#F5F0F2",
+    "card": "#FFFFFF",
+    "ink": "#2F2C32",
+    "muted": "#867C88",
+    "track": "#E8DFE4"
+  },
+  "effects": {
+    "colors": {
+      "main": "#8F86A3",
+      "mainLight": "#E2E0E4",
+      "mainShade": "#5A5068",
+      "accent": "#CA2739",
+      "accentShade": "#8A1B2A",
+      "accentSoft": "#E25A68",
+      "pale": "#F1E9EE",
+      "hot": "#F01F3D",
+      "storm": "#D8D2DE",
+      "stormDeep": "#A89DB4",
+      "stormShade": "#5E5068",
+      "dim": "#B4B0BA",
+      "sky": "#E6E0F2",
+      "skyDeep": "#B2A5D4",
+      "skyShade": "#6E6294",
+      "gold": "#F4C970"
+    },
+    "aura": [["mainLight", "pale"], ["accent", "mainLight"], ["hot", "accent"]],
+    "call": "러브 바이트!",
+    "callPlain": "LOVE BITE!",
+    "style": "gothic"
+  }
+}

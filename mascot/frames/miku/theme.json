@@ -1,0 +1,17 @@
+{
+  "name": "Miku",
+  "subtitle": "ミクの設定",
+  "beam": "Miku Miku Beam",
+  "colors": {
+    "primary": "#39C5BB",
+    "primaryDeep": "#22968F",
+    "accent": "#F6829A",
+    "accentDeep": "#C85C74",
+    "hot": "#F054A8",
+    "paper": "#EAF7F5",
+    "card": "#FFFFFF",
+    "ink": "#22414A",
+    "muted": "#6A8A91",
+    "track": "#D5ECE9"
+  }
+}
