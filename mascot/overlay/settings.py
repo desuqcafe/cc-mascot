@@ -13,6 +13,9 @@ one, so a slip in the file never breaks a mascot:
                    BEAM_RANGE; false: never (2)
     beamForAgents  a round that used subagents or background agents ends in
                    the beam too (true)
+    magicAfter     minutes a round of work lasts before its end sends magic
+                   to your pointer, when you are elsewhere, MAGIC_RANGE (0:
+                   every round); false: never (false)
     checkUpdates   the mod looks for a newer release on GitHub once a day
                    (false: the mascot never goes online)
 
@@ -25,14 +28,15 @@ from collections import namedtuple
 
 FILE = "settings.json"
 
-Settings = namedtuple("Settings", "size calm aura beamAfter beamForAgents checkUpdates")
+Settings = namedtuple("Settings", "size calm aura beamAfter beamForAgents magicAfter checkUpdates")
 DEFAULTS = Settings(size=420, calm=False, aura=(300_000, 400_000, 500_000), beamAfter=2, beamForAgents=True,
-                    checkUpdates=False)
+                    magicAfter=False, checkUpdates=False)
 
 SIZE_RANGE = (240, 640)
 SIZES = {"small": 300, "normal": 420, "large": 560}
 AURA_RANGE = (10_000, 10_000_000)
 BEAM_RANGE = (1, 120)
+MAGIC_RANGE = (0, 120)
 
 
 def _number(value, low, high):
@@ -56,6 +60,10 @@ def check(key, value):
         if value is False:
             return False
         return round(value) if _number(value, *BEAM_RANGE) else None
+    if key == "magicAfter":
+        if value is False:
+            return False
+        return round(value) if _number(value, *MAGIC_RANGE) else None
     return None
 
 
@@ -86,7 +94,8 @@ def save(path, **changes):
     raw = read_raw(path)
     for key, value in changes.items():
         value = None if value is None else check(key, value)
-        if value is None or value == getattr(DEFAULTS, key):
+        # Compared as written, as the mod does: 0 minutes is not false.
+        if value is None or json.dumps(value) == json.dumps(getattr(DEFAULTS, key)):
             raw.pop(key, None)
         else:
             raw[key] = list(value) if isinstance(value, tuple) else value

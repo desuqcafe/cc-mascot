@@ -1109,6 +1109,167 @@ def recoil(frame, age):
     return squash(frame, age - fire) if age >= fire else frame
 
 
+# Her call (the `magicAfter` setting): a round of work over while you are
+# elsewhere, she sends magic to your pointer, whichever display it is on. A
+# comet leaves her heart hands trailing sparkles and notes, and flies on an
+# arc to the pointer, homing in as it moves; it bursts there (a flash, a
+# ring of stars), then two notes and a heart circle the pointer, following
+# it, until you click or MAGIC_LINGER_S has passed, and fly apart. Hidden,
+# she sends it all the same: sparkles gather at the pointer instead. Calm:
+# a short trail, no flash or burst, the circling alone.
+#
+# It is drawn in a window of its own (magic.py), MAGIC_BOX square, centered
+# on the comet as it flies (`magic_head`), then on the pointer; what is in
+# it (`magic`) is worked out from the time alone, given where the comet
+# left and where the pointer is, around the middle of that window.
+
+MAGIC_BOX = 240  # px, the window's side
+MAGIC_SPEED = 2600  # px/s the comet adds to its shortest flight
+MAGIC_FLIGHT_S = (0.55, 1.1)  # its shortest and longest flight
+MAGIC_GATHER_S = 0.55  # hidden, the sparkles gather this long
+MAGIC_ARC = 0.22  # how far the arc bows, a share of the way
+MAGIC_TRAIL = 12  # sparkles in the trail, MAGIC_TRAIL_S apart on the way
+MAGIC_TRAIL_S = 0.022
+MAGIC_BURST_S = 0.7
+MAGIC_LINGER_S = 6.0  # circling the pointer at most this long after it lands
+MAGIC_LEAVE_S = 0.45
+
+
+def magic_from(w, h):
+    """Where her call leaves her frame, w by h: her heart hands."""
+    x, y = STYLE.HANDS_AT if STYLE else HANDS_AT
+    return x * w, y * h
+
+
+def magic_flight(start, target):
+    """How long the call takes to land, set as it leaves: flying from
+    `start` to `target` (desktop px), longer the farther; gathering when it
+    leaves from nowhere (`start` None: she is hidden)."""
+    if start is None:
+        return MAGIC_GATHER_S
+    low, high = MAGIC_FLIGHT_S
+    return min(high, low + math.dist(start, target) / MAGIC_SPEED)
+
+
+def _arc(start, target, e):
+    """A point `e` (0..1) of the way along the arc from `start` to `target`,
+    bowed upward."""
+    (x0, y0), (x2, y2) = start, target
+    dx, dy = x2 - x0, y2 - y0
+    d = math.hypot(dx, dy) or 1.0
+    nx, ny = -dy / d, dx / d
+    if ny > 0:
+        nx, ny = -nx, -ny
+    cx, cy = (x0 + x2) / 2 + nx * MAGIC_ARC * d, (y0 + y2) / 2 + ny * MAGIC_ARC * d
+    u = 1 - e
+    return u * u * x0 + 2 * u * e * cx + e * e * x2, u * u * y0 + 2 * u * e * cy + e * e * y2
+
+
+def magic_head(start, target, flight, age):
+    """Where the comet is (desktop px), `age` s after it left `start` for
+    the pointer at `target`; the pointer itself once it has landed."""
+    if start is None or age >= flight:
+        return target
+    p = max(0.0, age / flight)
+    return _arc(start, target, p * p * (3 - 2 * p))
+
+
+def magic_over(age, ended):
+    """Whether the call, `age` s in and ended at `ended` (None: not yet), is gone."""
+    return ended is not None and age - ended >= MAGIC_LEAVE_S
+
+
+def magic(start, target, flight, age, t, ended=None, calm=False):
+    """The call's sprites `age` s in, around the middle of its window (the
+    comet's head, then the pointer): `start` and `target` as for
+    `magic_head`, `flight` from `magic_flight`, `ended` the age at which
+    it was dismissed (None: not yet)."""
+    if STYLE:
+        return STYLE.magic(start, target, flight, age, t, ended, calm)
+    return _magic(start, target, flight, age, t, ended, calm)
+
+
+def _magic(start, target, flight, age, t, ended, calm, note=lambda k, tint: f"note_{tint}"):
+    """Miku's call; a style with the same sprite names may use it too,
+    `note(k, tint)` naming the sprite of its note k."""
+    box = MAGIC_BOX
+    reach = 0.45 * box  # nothing is drawn farther from the middle
+    draws = []
+    if age < flight and start is None:
+        # Gathering at the pointer: sparkles spiral in.
+        p = age / flight
+        for i in range(4 if calm else 8):
+            q = min(1.0, max(0.0, (p - 0.05 * i) / 0.6))
+            if 0 < q < 1:
+                a = i * math.tau / 8 + 4 * q
+                r = reach * (1 - q) ** 1.2
+                sprite = ("spark_main", "spark_accent", "star_main", "spark_accent")[i % 4]
+                draws.append(Draw(sprite, r * math.cos(a), r * math.sin(a), 0.6 + 0.6 * (1 - q), min(1.0, q * 4), 90 * q))
+        return draws
+    if age < flight:
+        # The trail: where the head was a moment ago, fading with distance.
+        hx, hy = magic_head(start, target, flight, age)
+        for i in range(1, (5 if calm else MAGIC_TRAIL) + 1):
+            back = age - MAGIC_TRAIL_S * i
+            if back < 0:
+                break
+            x, y = magic_head(start, target, flight, back)
+            ox, oy = x - hx, y - hy
+            dist = math.hypot(ox, oy)
+            if dist >= reach:
+                break
+            fade = (1 - dist / reach) * (1 - i / (MAGIC_TRAIL + 1))
+            wobble = 0.05 * box * math.sin(i * 1.9 + t * 9) * min(1.0, dist / (0.1 * box))
+            if i % 4 == 0:
+                draws.append(Draw(note(i // 4, "accent" if i % 8 else "main"), ox, oy + wobble, 1.0, fade, 15 * math.sin(t * 6 + i)))
+            else:
+                sprite = ("spark_main", "spark_accent", "pixel_main")[i % 3]
+                draws.append(Draw(sprite, ox, oy - wobble, 2.0 - 0.08 * i, fade, 40 * i + 300 * t))
+        if not calm:
+            draws.append(Draw("flash_main", 0, 0, 1.3, 0.6))
+        draws.append(Draw("star_main", 0, 0, 1.6, 1.0, -400 * age))
+        return draws
+    landed = age - flight
+    if landed < MAGIC_BURST_S and not calm:
+        # It bursts on the pointer: a flash, a ring of stars flying out.
+        p = landed / MAGIC_BURST_S
+        draws.append(Draw("flash_accent", 0, 0, 1.0 + 1.6 * p, 0.8 * (1 - p) ** 2))
+        out = 1 - (1 - p) ** 3
+        for i in range(8):
+            a = math.tau * i / 8 + 0.3
+            r = box * (0.08 + 0.3 * out)
+            draws.append(Draw("star_" + ("main", "accent", "gold", "accent")[i % 4], r * math.cos(a), r * math.sin(a),
+                              (1.1 - 0.6 * p) * pop(landed, 0, 0.12), 1 - p ** 3, 180 * p))
+    # Circling the pointer (a little down and right of its tip, around the
+    # arrow), then flying apart once dismissed.
+    leave = 0.0 if ended is None else _span(age - ended, 0, MAGIC_LEAVE_S)
+    grow = pop(landed, 0.12, 0.35)
+    cx, cy = 0.03 * box, 0.04 * box
+    if grow > 0 and leave < 1:
+        for i, sprite in enumerate((note(0, "main"), "heart", note(1, "accent"))):
+            a = 2.4 * landed + math.tau * i / 3
+            r = box * (0.17 + 0.2 * leave)
+            bob = 0.012 * box * math.sin(t * 5 + i * 2)
+            draws.append(Draw(sprite, cx + r * math.cos(a), cy + 0.8 * r * math.sin(a) + bob, grow * (0.9 + 0.3 * leave),
+                              1 - leave, 12 * math.sin(t * 3 + i)))
+        if not calm and ended is None:
+            q = (landed % 0.9) / 0.9
+            n = math.floor(landed / 0.9)
+            a = n * 2.4
+            draws.append(Draw("spark_" + ("accent" if n % 2 else "main"), cx + 0.26 * box * math.cos(a),
+                              cy + 0.22 * box * math.sin(a), 1.3 * pulse(q), pulse(q), 90 * q))
+    if ended is not None and not calm:
+        # A pop of sparkles as it goes.
+        p = (age - ended) / MAGIC_LEAVE_S
+        if 0 <= p < 1:
+            for i in range(6):
+                a = math.tau * i / 6
+                r = box * (0.1 + 0.25 * p)
+                draws.append(Draw("spark_" + ("accent" if i % 2 else "main"), cx + r * math.cos(a), cy + r * math.sin(a),
+                                  1.2 * (1 - p), 1 - p, 120 * p))
+    return draws
+
+
 PLACEMENTS = {"thinking": thinking, "working": working, "waiting": waiting, "worried": worried, "sleepy": sleepy,
               "happy": happy, "error": error, "beam": beam}
 
@@ -2253,7 +2414,8 @@ class Carry:
 # shrink with her, so symbols, aura and beam keep their room. One mascot per
 # process: the overlay sets her size here.
 
-_BASE_PADS = {name: globals()[name] for name in ("PAD_TOP", "PAD_RIGHT", "PAD_LEFT", "BEAM_PAD", "DRAG_PAD", "AURA_RADIUS")}
+_BASE_PADS = {name: globals()[name] for name in ("PAD_TOP", "PAD_RIGHT", "PAD_LEFT", "BEAM_PAD", "DRAG_PAD", "AURA_RADIUS",
+                                                     "MAGIC_BOX")}
 
 
 def scale_to(height):

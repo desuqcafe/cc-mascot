@@ -390,11 +390,20 @@ class SessionFile(unittest.TestCase):
 
     def test_reads_frame_info_and_visibility(self):
         write(overlay.SESSION_PATH, {"frame": "waiting", "info": {"tool": "Bash"}, "visible": False, "visibleAt": 5})
-        self.assertEqual(overlay.read_state(), ("waiting", {"tool": "Bash"}, (False, 5), False, 0, None, None))
+        self.assertEqual(overlay.read_state(), ("waiting", {"tool": "Bash"}, (False, 5), False, 0, None, None, None))
 
     def test_an_unknown_frame_is_idle_and_no_choice_is_none(self):
         write(overlay.SESSION_PATH, {"frame": "dancing"})
-        self.assertEqual(overlay.read_state(), ("idle", {}, None, False, 0, None, None))
+        self.assertEqual(overlay.read_state(), ("idle", {}, None, False, 0, None, None, None))
+
+    def test_a_call_to_the_pointer(self):
+        write(overlay.SESSION_PATH, {"frame": "happy", "call": {"at": 12}})
+        self.assertEqual(overlay.read_state().call, (12, False))
+        write(overlay.SESSION_PATH, {"frame": "happy", "call": {"at": 13, "test": True}})
+        self.assertEqual(overlay.read_state().call, (13, True))
+        for call in ({}, {"at": "now"}, {"at": True}, 12, "yes"):
+            write(overlay.SESSION_PATH, {"frame": "happy", "call": call})
+            self.assertIsNone(overlay.read_state().call, call)
 
     def test_a_new_version_to_celebrate(self):
         write(overlay.SESSION_PATH, {"frame": "idle", "update": {"version": "0.15.0", "route": "clone", "celebrate": 9, "from": "0.14.1"}})

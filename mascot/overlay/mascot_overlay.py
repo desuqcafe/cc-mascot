@@ -44,6 +44,9 @@ past her window's usual edges (effects.beamed), so for its first seconds
 the window is effects.BEAM_PAD larger on every side. So is it while a new
 version's banner plays (effects.updated): once, when the mod says a newer
 version than the last one run has loaded (the session file's `update`).
+When a round of work ends while you are elsewhere, she sends magic to your
+pointer, on any display (the session file's `call`, magic.py), in a window
+of its own that clicks pass through; hidden, she sends it all the same.
 
 The overlay runs while its session does, shown or hidden, and says on stdout
 what was chosen in its window (`hidden`). Its art is loaded only while it is
@@ -74,6 +77,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 import effects as fx
+import magic
 import settings as cfg
 from layered import LayeredWindow
 
@@ -399,8 +403,8 @@ def tag_image(text, size):
 Playing = namedtuple("Playing", "kind since then calm")
 Playing.__new__.__defaults__ = (False,)
 
-SessionState = namedtuple("SessionState", "mood info choice ended cleared character celebrate")
-SessionState.__new__.__defaults__ = (0, None, None)
+SessionState = namedtuple("SessionState", "mood info choice ended cleared character celebrate call")
+SessionState.__new__.__defaults__ = (0, None, None, None)
 
 # A new version's banner is played when the mod's word of it (`celebrate`,
 # epoch ms) is this fresh; an overlay started later, by a reload, lets it be.
@@ -415,6 +419,16 @@ def celebrate_of(data):
     if isinstance(at, (int, float)) and not isinstance(at, bool) and isinstance(version, str) \
             and re.fullmatch(r"\d+(\.\d+){1,3}", version):
         return at, version
+    return None
+
+
+def call_of(data):
+    """(when, whether a test) of the last call to the pointer the session
+    file's `call` asks for (magic.py); None for none."""
+    call = data.get("call") if isinstance(data.get("call"), dict) else {}
+    at = call.get("at")
+    if isinstance(at, (int, float)) and not isinstance(at, bool):
+        return at, call.get("test") is True
     return None
 
 
@@ -465,6 +479,7 @@ def read_state(path=None):
         data["cleared"] if isinstance(data.get("cleared"), (int, float)) and not isinstance(data.get("cleared"), bool) else 0,
         data["character"] if isinstance(data.get("character"), str) and re.fullmatch(r"[A-Za-z0-9_-]+", data["character"]) else None,
         celebrate_of(data),
+        call_of(data),
     )
 
 
@@ -1178,7 +1193,13 @@ def run_window(parent, starter):
         "celebrated": 0,
         "celebrate": None,
         "celebration": None,
+        # Her call to the pointer (magic.py): the last word of one seen
+        # (epoch ms; one already in the file at the start is old), and one
+        # waiting for you, {test, seen (monotonic s)}.
+        "called": first.call[0] if first.call else 0,
+        "call": None,
     }
+    calls = magic.Magic(root)
 
     def calm():
         return state["prefs"].calm
@@ -1464,6 +1485,7 @@ def run_window(parent, starter):
                 if state["shown"]:
                     play("intro")  # her art is still built
                 return
+            calls.stop()  # drawn in her old look
             if resizing["height"] is not None:  # a size being built: build the new art at it
                 set_height(resizing["height"])
                 resizing.update(height=None, done={})
@@ -1493,8 +1515,13 @@ def run_window(parent, starter):
                 if current.cleared != state["cleared"]:
                     # A /clear: the same session on a fresh conversation.
                     state["cleared"] = current.cleared
+                    state["call"] = None  # you are at her terminal
                     if state["shown"] and state["act"] is None:
                         play("channel")
+                if current.call and current.call[0] != state["called"]:
+                    # A round is over: her call, once you are around.
+                    state["called"] = current.call[0]
+                    state["call"] = {"test": current.call[1], "seen": time.monotonic()}
                 if current.celebrate and current.celebrate[0] != state["celebrated"]:
                     # A newer version has loaded: her banner, once.
                     state["celebrated"] = current.celebrate[0]
@@ -1511,8 +1538,35 @@ def run_window(parent, starter):
             elif not want and state["shown"]:
                 leave(hide)
         follow_character()
+        answer_call()
         if not state["ending"]:
             root.after(POLL_MS, poll)
+
+    def answer_call():
+        """Sends a waiting call once you are around and not already looking
+        at her session (magic.verdict); a new round of work, or her being
+        in your hand, drops it. It leaves her as she fires her finish."""
+        call = state["call"]
+        if call is None:
+            return
+        if state["ending"] or (not call["test"] and (state["mood"] in ("thinking", "working") or state["drag"])):
+            state["call"] = None
+            return
+        if time.monotonic() - call["seen"] < fx.CHARGE_S:
+            return
+        answer = magic.verdict(call["test"], magic.idle_s() >= magic.AWAY_S, magic.notifications_held(),
+                               magic.pointer(), lambda: magic.is_watching(magic.foreground_pid(), parent, process_table(),
+                                                                          magic.foreground_title()))
+        if answer == "wait":
+            return
+        state["call"] = None
+        if answer == "go":
+            start = None
+            if state["shown"] and art.frames.get("idle"):
+                width, height = art.size()
+                x, y = fx.magic_from(width, height)
+                start = (state["pos"]["x"] + x, state["pos"]["y"] + y)
+            calls.send(start, sprites or fx.build_sprites(HEIGHT), calm())
 
     def draw_card():
         if not hover["shown"]:

@@ -3,7 +3,7 @@ mood symbols, glitch, status effects and the hologram intro, exactly as the
 overlay composes them (effects.py is pure functions of time), onto a dark
 backdrop since GIFs have no soft alpha.
 
-    python docs/make_gifs.py [--character NAME] [hero] [moods] [held] [beam] [status] [social] [settings]
+    python docs/make_gifs.py [--character NAME] [hero] [moods] [held] [beam] [magic] [status] [social] [settings]
 
 Writes docs/media/*.gif, and settings.png (the settings window); another
 character's (`--character yunseul`: her art, colors and style) into
@@ -147,6 +147,49 @@ def beam():
     save("beam.gif", [flatten(im, 0.5) for im in images])
 
 
+def pointer_image(scale=1.0):
+    """Windows' arrow pointer, white in a black edge, its tip at (1, 1)."""
+    from PIL import ImageDraw
+
+    tip = [(0, 0), (0, 17), (4, 13), (7, 20), (10, 19), (7, 12), (12, 12)]
+    k = 1.5 * scale
+    img = Image.new("RGBA", (round(16 * k) + 3, round(23 * k) + 3), (0, 0, 0, 0))
+    ImageDraw.Draw(img).polygon([(1 + x * k, 1 + y * k) for x, y in tip], fill=(255, 255, 255, 255), outline=(0, 0, 0, 255),
+                                width=max(1, round(k)))
+    return img
+
+
+def magic():
+    """Her call: happy as a round ends, magic flies from her heart hands to
+    the pointer up and right of her, bursts, circles it, and goes at a click."""
+    tag = tag_image("my-app", TAG_PX)
+    first = render("happy", 100, 0.0, tag=tag)
+    w, h = frames("happy")[0][0].size
+    card_w, card_h = round(first.width * 2.9), round(first.height * 1.25)
+    at = (24, card_h - first.height)  # her window's top left on the card
+    hands = fx.magic_from(w, h)
+    start = (at[0] + fx.PAD_LEFT + hands[0], at[1] + fx.PAD_TOP + hands[1])
+    target = (card_w - round(0.16 * card_w), round(0.2 * card_h))
+    flight = fx.magic_flight(start, target)
+    leaves = fx.CHARGE_S  # as the overlay sends it: as she fires her finish
+    ended = flight + 2.6  # a click, this long after it left
+    arrow = pointer_image()
+    images = []
+    for i in range(int((leaves + ended + fx.MAGIC_LEAVE_S + 0.4) * FPS)):
+        t = i / FPS
+        card = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+        card.alpha_composite(render("happy", 100 + t, t, tag=tag), at)
+        age = t - leaves
+        gone = ended if age >= ended else None
+        if age >= 0 and not fx.magic_over(age, gone):
+            # Drawn around the comet's head, as in its own window.
+            head = fx.magic_head(start, target, flight, age)
+            fx.paint(card, fx.magic(start, target, flight, age, 100 + t, gone), SPRITES, head)
+        card.alpha_composite(arrow, (target[0] - 1, target[1] - 1))
+        images.append(card)
+    save("magic.gif", [flatten(im, 0.5) for im in images])
+
+
 def status():
     tag = tag_image("my-app", TAG_PX)
     looks = {
@@ -233,6 +276,6 @@ SPRITES = fx.build_sprites(HEIGHT)
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    which = ARGS or ["hero", "moods", "held", "beam", "status", "settings"] + (["social"] if CHARACTER == "miku" else [])
+    which = ARGS or ["hero", "moods", "held", "beam", "magic", "status", "settings"] + (["social"] if CHARACTER == "miku" else [])
     for job in which:
         globals()[job]()

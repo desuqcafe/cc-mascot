@@ -60,6 +60,24 @@ whenever you like.
 | error | A tool failed, or a reply ended on an error. Declining a prompt doesn't count. |
 | sleepy | Idle for 5 minutes. |
 
+### Cursor magic
+
+<img src="docs/media/magic.gif" alt="Miku cheers as a round of work ends and sends a sparkling star flying to the mouse pointer, where it bursts into stars and notes circle the pointer" width="300" align="right">
+
+Off by default. Turned on, a job that ran a while ends with her sending
+magic to your mouse pointer, wherever it is, even on another display: a
+star flies from her hands, bursts on the pointer, and notes and a heart
+circle it until you click. She only sends it when you're looking somewhere
+else, not at her session (her own tab, when your terminal has several).
+If you've stepped away, she waits until you're back. She also waits while a
+fullscreen game or presentation is on (anything Windows holds notifications
+back for). Clicks pass right through it, and it never takes the focus from
+what you're typing in. Turn it on in the settings window, or with
+`/mascot magic after 1` (minutes; `0` for every job). `/mascot magic` sends
+one to try it.
+
+<br clear="right">
+
 ### She keeps an eye on your session
 
 Long sessions and usage limits show on her too, whatever her mood:
@@ -124,6 +142,9 @@ window.
 Her big finish: bats spiral into her heart hands, then stitched hearts and
 a swarm of bats burst out at you, with crimson rays, a shockwave and a
 러브 바이트! banner on bat wings.
+
+Her cursor magic is a silver glint trailing petals and bats, roses bursting
+on the pointer, two bats and a stitched heart circling it.
 
 <br clear="right">
 
@@ -217,13 +238,15 @@ clone); type `/reload-plugins` afterwards to meet her new version.
 | `/mascot aura [A B C\|off]` | When her aura's three levels start (default `300k 400k 500k`), or no aura. |
 | `/mascot beam after [MINUTES\|never]` | How long a job runs before it ends in the beam (default 2). |
 | `/mascot beam agents [on\|off]` | Whether jobs with subagents or background agents end in it too. |
+| `/mascot magic` | Send cursor magic to your pointer now, to try it. |
+| `/mascot magic after [MINUTES\|never]` | How long a job runs before its end sends magic to your pointer, when you're elsewhere (0 for every job; off by default). |
 | `/mascot updates [on\|off]` | Look for a new version once a day (off by default). |
 | `/mascot update` | Update her to the newest version. |
 | `/mascot reset` | Every setting back to its default. |
 
 ## Settings
 
-<img src="docs/media/settings.png" alt="The settings window in Miku's teal and pink: her character, size with a preview of her, calm mode, the aura's thresholds, the beam and updates" width="400"> <img src="docs/media/yunseul/settings.png" alt="The same window in Yunseul's crimson and lilac, with her picked" width="400">
+<img src="docs/media/settings.png" alt="The settings window in Miku's teal and pink: her character, size with a preview of her, calm mode, the aura's thresholds, the beam, cursor magic and updates" width="400"> <img src="docs/media/yunseul/settings.png" alt="The same window in Yunseul's crimson and lilac, with her picked" width="400">
 
 The window picks her character too: click a character to switch this
 session's mascot. With "Remember for this project" on (the default), the

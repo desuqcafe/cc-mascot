@@ -4,6 +4,9 @@ a color key only has fully shown and fully hidden pixels. Fully transparent
 pixels let clicks through to what is behind.
 
 Tk paints nothing in such a window: everything she shows is in the image.
+`popup()` makes a window of that kind without Tk, for an effect that must
+never get in the way: clicks pass through all of it and it is never
+activated (her call to the pointer, magic.py).
 """
 
 import ctypes
@@ -14,6 +17,12 @@ from PIL import Image, ImageChops
 GWL_EXSTYLE = -20
 WS_EX_LAYERED = 0x80000
 WS_EX_TOPMOST = 0x8
+WS_EX_TRANSPARENT = 0x20
+WS_EX_TOOLWINDOW = 0x80
+WS_EX_NOACTIVATE = 0x08000000
+WS_POPUP = 0x80000000
+SW_HIDE, SW_SHOWNOACTIVATE = 0, 4
+POPUP_CLASS = "MascotEffect"
 GW_HWNDPREV = 3
 HWND_TOPMOST = -1
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER = 0x1, 0x2, 0x10, 0x200
@@ -34,8 +43,28 @@ class BITMAPINFOHEADER(ctypes.Structure):
     ]
 
 
+class WNDCLASSEXW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wt.UINT), ("style", wt.UINT), ("lpfnWndProc", ctypes.c_void_p), ("cbClsExtra", ctypes.c_int),
+        ("cbWndExtra", ctypes.c_int), ("hInstance", wt.HINSTANCE), ("hIcon", wt.HICON), ("hCursor", wt.HANDLE),
+        ("hbrBackground", wt.HBRUSH), ("lpszMenuName", wt.LPCWSTR), ("lpszClassName", wt.LPCWSTR), ("hIconSm", wt.HICON),
+    ]
+
+
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
+kernel32 = ctypes.windll.kernel32
+kernel32.GetModuleHandleW.argtypes = [wt.LPCWSTR]
+kernel32.GetModuleHandleW.restype = wt.HMODULE
+user32.RegisterClassExW.argtypes = [ctypes.POINTER(WNDCLASSEXW)]
+user32.RegisterClassExW.restype = wt.ATOM
+user32.CreateWindowExW.argtypes = [
+    wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    wt.HWND, wt.HMENU, wt.HINSTANCE, wt.LPVOID,
+]
+user32.CreateWindowExW.restype = wt.HWND
+user32.ShowWindow.argtypes = [wt.HWND, ctypes.c_int]
+user32.DestroyWindow.argtypes = [wt.HWND]
 user32.GetParent.argtypes = [wt.HWND]
 user32.GetParent.restype = wt.HWND
 user32.GetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int]
@@ -68,13 +97,33 @@ def premultiplied_bgra(img):
     return Image.merge("RGBA", (ImageChops.multiply(b, a), ImageChops.multiply(g, a), ImageChops.multiply(r, a), a)).tobytes()
 
 
-class LayeredWindow:
-    """A Tk toplevel shown through UpdateLayeredWindow. `show(img, x, y)`
-    puts an RGBA image at desktop pixels (x, y); `close()` frees the bitmap."""
+def popup():
+    """A window for an effect that must never get in the way, its hwnd:
+    layered, topmost, clicks passing through all of it, never activated,
+    out of the taskbar and Alt+Tab. Hidden until `LayeredWindow.reveal`.
+    Made on Tk's thread, whose loop pumps its messages (Windows' own
+    handling is all it needs)."""
+    instance = kernel32.GetModuleHandleW(None)
+    cls = WNDCLASSEXW()
+    cls.cbSize = ctypes.sizeof(WNDCLASSEXW)
+    cls.lpfnWndProc = ctypes.cast(user32.DefWindowProcW, ctypes.c_void_p).value
+    cls.hInstance = instance
+    cls.lpszClassName = POPUP_CLASS
+    user32.RegisterClassExW(ctypes.byref(cls))  # 0 the second time: already registered
+    style = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+    return user32.CreateWindowExW(style, POPUP_CLASS, "", WS_POPUP, 0, 0, 1, 1, None, None, instance, None)
 
-    def __init__(self, tk_window):
-        tk_window.update_idletasks()
-        self.hwnd = user32.GetParent(tk_window.winfo_id()) or tk_window.winfo_id()
+
+class LayeredWindow:
+    """A Tk toplevel (or a `popup()`'s hwnd) shown through
+    UpdateLayeredWindow. `show(img, x, y)` puts an RGBA image at desktop
+    pixels (x, y); `close()` frees the bitmap."""
+
+    def __init__(self, tk_window=None, hwnd=None):
+        if tk_window is not None:
+            tk_window.update_idletasks()
+            hwnd = user32.GetParent(tk_window.winfo_id()) or tk_window.winfo_id()
+        self.hwnd = hwnd
         self._layer()
         self.dc = None
         self.bitmap = None
@@ -139,6 +188,22 @@ class LayeredWindow:
                 return True
             above = user32.GetWindow(above, GW_HWNDPREV)
         return False
+
+    def reveal(self):
+        """Shows a hidden window over the other topmost ones, not activated."""
+        user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
+        user32.SetWindowPos(self.hwnd, wt.HWND(HWND_TOPMOST), 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER)
+
+    def conceal(self):
+        user32.ShowWindow(self.hwnd, SW_HIDE)
+
+    def destroy(self):
+        """Frees the bitmap and destroys a `popup()`'s window."""
+        self.close()
+        if self.hwnd:
+            user32.DestroyWindow(self.hwnd)
+        self.hwnd = None
 
     def close(self):
         if self.dc:

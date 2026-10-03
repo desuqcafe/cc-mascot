@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type {
+  MascotCall,
   MascotFrame,
   MascotMood,
   MascotSessionFile,
@@ -15,7 +16,8 @@ const HOLD_MS = 3000
 // A round of work (from a prompt until all of it is done) of the `beamAfter`
 // setting's minutes or more, or one that used subagents or background agents
 // (`beamForAgents`), ends in her big finish, the beam, held this long,
-// instead of happy.
+// instead of happy. One of the `magicAfter` setting's minutes or more ends
+// in her call too: magic sent to the pointer, when the person is elsewhere.
 const BEAM_MS = 3600
 // After the last subagent ends, how long to wait for the main agent to pick
 // its results up before calling the work done.
@@ -81,12 +83,14 @@ const DEFAULTS: Settings = {
   aura: [300_000, 400_000, 500_000],
   beamAfter: 2,
   beamForAgents: true,
+  magicAfter: false,
   checkUpdates: false,
 }
 const SIZE_RANGE = [240, 640] as const
 const SIZES: Record<string, number> = { small: 300, normal: 420, large: 560 }
 const AURA_RANGE = [10_000, 10_000_000] as const
 const BEAM_RANGE = [1, 120] as const
+const MAGIC_RANGE = [0, 120] as const
 
 const inRange = (v: unknown, [low, high]: readonly [number, number]): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v >= low && v <= high
@@ -102,6 +106,7 @@ const checks: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   },
   beamAfter: v => (v === false ? false : inRange(v, BEAM_RANGE) ? Math.round(v) : undefined),
   beamForAgents: v => (typeof v === 'boolean' ? v : undefined),
+  magicAfter: v => (v === false ? false : inRange(v, MAGIC_RANGE) ? Math.round(v) : undefined),
   checkUpdates: v => (typeof v === 'boolean' ? v : undefined),
 }
 
@@ -125,6 +130,8 @@ let isEnded = false
 // When the conversation was last cleared (/clear, /resume): the overlay
 // changes channel when this changes.
 let clearedAt: number | undefined
+// Her last call to the pointer: the overlay sends one when this changes.
+let call: MascotCall | undefined
 // The character the overlay shows: a new one (/mascot character) makes it
 // play its outro, take on the new art and play its intro, on the same spot.
 let characterNow: string | undefined
@@ -216,6 +223,7 @@ const loadSettings = async ($: EngineInterface): Promise<Settings> => {
     aura: pick('aura'),
     beamAfter: pick('beamAfter'),
     beamForAgents: pick('beamForAgents'),
+    magicAfter: pick('magicAfter'),
     checkUpdates: pick('checkUpdates'),
   }
 }
@@ -263,6 +271,7 @@ const writeFile = async ($: EngineInterface) => {
       cleared: clearedAt,
       character: characterNow,
       update: release,
+      call,
     }
     if (path) await $.fs.write(path, JSON.stringify(file))
   } catch {
@@ -668,6 +677,8 @@ const openSettingsWindow = async ($: EngineInterface): Promise<string | undefine
             void checkForUpdates($, true)
           } else if (verb === 'update') {
             updateInBackground($)
+          } else if (verb === 'magic') {
+            await sendMagic($, true)
           }
         }
       }
@@ -766,14 +777,24 @@ const settle = async ($: EngineInterface) => {
     if (w.isSettled) return
     await update($, work, cur => ({ ...cur, isSettled: true }))
     const now = await $.clock.now()
-    const { beamAfter, beamForAgents } = await loadSettings($)
-    const isLong = beamAfter !== false && round.since !== undefined && now - round.since >= beamAfter * 60_000
-    const isBig = (beamForAgents && round.hadAgents) || isLong
+    const { beamAfter, beamForAgents, magicAfter } = await loadSettings($)
+    const lasted = (minutes: number | false) =>
+      minutes !== false && round.since !== undefined && now - round.since >= minutes * 60_000
+    const isBig = (beamForAgents && round.hadAgents) || lasted(beamAfter)
+    if (lasted(magicAfter)) call = { at: now }
     round = { hadAgents: false }
     await show($, isBig ? 'beam' : 'happy', { holdMs: isBig ? BEAM_MS : HOLD_MS, after: 'idle' })
   } catch {
     // A mascot never gets in the way of the session.
   }
+}
+
+// Sends her call to the pointer now (/mascot magic, the settings window's
+// button): a test, so the overlay does not wait for the person to be
+// elsewhere.
+const sendMagic = async ($: EngineInterface, test = false) => {
+  call = { at: await $.clock.now(), ...(test ? { test: true as const } : {}) }
+  await writeFile($)
 }
 
 // The turn died on an error (an API error past its retries, a refusal).
@@ -809,6 +830,10 @@ const describe = {
     s.beamForAgents
       ? 'Rounds with subagents or background agents end in the beam.'
       : 'Rounds with subagents or background agents end in the beam only when long.',
+  magicAfter: (s: Settings) =>
+    s.magicAfter === false
+      ? 'No cursor magic.'
+      : `Rounds of work of ${s.magicAfter} min or more send magic to your pointer when you are elsewhere.`,
   checkUpdates: (s: Settings) =>
     s.checkUpdates ? 'Looks for a new version once a day.' : 'Never goes online to look for a new version.',
 }
@@ -858,6 +883,14 @@ const settingsCommand = async ($: EngineInterface, words: string[]): Promise<str
     if (on !== 'on' && on !== 'off') return 'Beam agents takes on or off.'
     return set('beamForAgents', on === 'on')
   }
+  if (verb === 'magic' && value === 'after' && rest.length <= 2) {
+    const [, minutes] = rest
+    if (!minutes) return `${await now('magicAfter')} /mascot magic after <minutes>|never|default.`
+    if (minutes === 'never' || minutes === 'default') return set('magicAfter', null)
+    const n = Number(minutes.replace(/m(in)?$/, ''))
+    if (checks.magicAfter(n) === undefined) return 'Magic after takes minutes (0 to 120), never or default.'
+    return set('magicAfter', n)
+  }
   if (verb === 'updates' && !extra) {
     const about = release
       ? `Mascot v${release.version}${release.latest ? `; v${release.latest} is out: /mascot update` : ''}.`
@@ -873,7 +906,15 @@ const settingsCommand = async ($: EngineInterface, words: string[]): Promise<str
     return `${problem ?? 'Settings window opened.'} ${settingsSummary(await loadSettings($))}`
   }
   if (verb === 'reset' && !value) {
-    await saveSettings($, { size: null, calm: null, aura: null, beamAfter: null, beamForAgents: null, checkUpdates: null })
+    await saveSettings($, {
+      size: null,
+      calm: null,
+      aura: null,
+      beamAfter: null,
+      beamForAgents: null,
+      magicAfter: null,
+      checkUpdates: null,
+    })
     return `Settings back to their defaults. ${settingsSummary(DEFAULTS)}`
   }
   return undefined
@@ -898,9 +939,9 @@ export const register: Register = on => {
     await $.command.register({
       name: 'mascot',
       description:
-        "Show or hide this session's mascot (or every session's), pick its character, fire her beam, update her, or change her settings",
+        "Show or hide this session's mascot (or every session's), pick its character, fire her beam, send magic to your pointer, update her, or change her settings",
       argumentHint:
-        '[show|hide] [all] | character [name] | beam | update | settings | size | calm | aura | beam after | updates | reset',
+        '[show|hide] [all] | character [name] | beam | magic | update | settings | size | calm | aura | beam after | magic after | updates | reset',
       immediate: true,
     })
     // A reload keeps this session's choice; a new session takes the last one
@@ -925,9 +966,11 @@ export const register: Register = on => {
     const help =
       'Usage: /mascot [show|hide] [all] toggles, shows or hides this session\'s mascot (or every session\'s); ' +
       '/mascot character [name] lists or picks the character for this project; /mascot beam fires her beam; ' +
+      '/mascot magic sends magic to your pointer; ' +
       '/mascot update updates her to the newest version. ' +
       'Settings, for every mascot: /mascot settings; size [small|normal|large|<px>]; calm [on|off]; ' +
-      'aura [<3 token counts>|off]; beam after [<minutes>|never]; beam agents [on|off]; updates [on|off]; reset.'
+      'aura [<3 token counts>|off]; beam after [<minutes>|never]; beam agents [on|off]; ' +
+      'magic after [<minutes>|never]; updates [on|off]; reset.'
     try {
       const answer = await settingsCommand($, words)
       if (answer !== undefined) return { text: answer }
@@ -942,6 +985,11 @@ export const register: Register = on => {
       await show($, 'beam', { holdMs: BEAM_MS, after: back === 'beam' ? 'idle' : back })
       const call = `${await beamName($)}!`
       return { text: view.visible ? call : `${call} (She is hidden: /mascot show to see it.)` }
+    }
+    if (verb === 'magic' && !target) {
+      // Her call, to try it: it goes to the pointer as soon as it shows.
+      await sendMagic($, true)
+      return { text: 'Magic sent to your pointer!' }
     }
     if (verb === 'update' && !target) {
       if (!release) return { text: 'Mascot: its version is unknown, so it cannot update itself.' }

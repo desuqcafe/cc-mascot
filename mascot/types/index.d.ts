@@ -32,8 +32,17 @@ export type MascotSessionFile = {
   cleared?: number
   character?: string
   update?: MascotUpdate
+  call?: MascotCall
   ended?: true
 }
+
+/**
+ * Her call to the pointer: a round of work ended (`at`, epoch ms) that
+ * lasted the `magicAfter` setting's minutes. The overlay sends magic to the
+ * pointer once the person is around and not already looking at this
+ * session; `test` (/mascot magic) sends it as soon as the pointer shows.
+ */
+export type MascotCall = { at: number; test?: true }
 
 /**
  * The mascot's version and its updates: `version` the one running; `latest`
@@ -63,7 +72,9 @@ export type MascotUpdate = {
  * ([300000, 400000, 500000]); `beamAfter` the minutes a round of work lasts
  * before it ends in the beam (1-120), or false for never (2);
  * `beamForAgents` a round that used agents ends in it too (true);
- * `checkUpdates` look for a newer release on GitHub once a day (false).
+ * `magicAfter` the minutes a round of work lasts before its end sends magic
+ * to the pointer, when the person is elsewhere (0-120: 0 every round), or
+ * false for never (false); `checkUpdates` look for a newer release on GitHub once a day (false).
  */
 export type MascotSettings = {
   size?: number
@@ -71,6 +82,7 @@ export type MascotSettings = {
   aura?: [number, number, number] | false
   beamAfter?: number | false
   beamForAgents?: boolean
+  magicAfter?: number | false
   checkUpdates?: boolean
 }
 

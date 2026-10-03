@@ -19,12 +19,13 @@ Its Updates card shows her version and what is new in it (whatsnew.json),
 turns the daily check for a newer one on and off (`checkUpdates`; turning
 it on says `check`, so the mod looks at once), and, when the mod has found
 one (the session file's `update`), offers it: a press says `update`, and
-the mod's progress shows as it writes it.
+the mod's progress shows as it writes it. Its cursor magic card's button
+says `magic`: the mod sends her call to the pointer at once, to try it.
 
 Everything in it is drawn with Pillow onto one Tk canvas, anime-sticker
 style like her symbols (soft edges, white borders, glows): a header with
 her portrait, the character card, then a card each for her size, calm
-mode, the aura, the beam and updates, with widgets of its own (`Slider`,
+mode, the aura, the beam, cursor magic and updates, with widgets of its own (`Slider`,
 `Tiers`, `Toggle`...). Layout is in logical px (`WIDTH` wide), times the
 display's scale.
 """
@@ -65,8 +66,11 @@ DISABLED = 0.4  # a widget that does nothing now is drawn this faint
 # The ranges the sliders show; the settings take more (by hand or /mascot),
 # shown at the slider's end.
 UPDATES = 100  # the updates card's height
+MAGIC = 96  # the cursor magic card's height
 AURA_SHOWN = (0, 1_000_000, 10_000)  # low, high, step (and the least gap)
 BEAM_SHOWN = (1, 30, 1)
+MAGIC_SHOWN = (0, 30, 1)
+MAGIC_ON = 1  # minutes, the first time cursor magic is turned on
 SIZE_STEP = 10
 
 # ---------------------------------------------------------------- theme
@@ -754,9 +758,11 @@ class App:
         self.pending = {}
         self.save_job = None
         self.problem = ""
-        # What the aura and the long-rounds beam were when last on, for turning them on again.
+        # What the aura, the long-rounds beam and cursor magic were when last
+        # on, for turning them on again.
         self.last_aura = self.prefs.aura or cfg.DEFAULTS.aura
         self.last_minutes = self.prefs.beamAfter or cfg.DEFAULTS.beamAfter
+        self.last_magic = MAGIC_ON if self.prefs.magicAfter is False else self.prefs.magicAfter
         self.raise_mtime = mtime_of(os.path.join(state_dir, RAISE_FILE))
         # Her version and its updates (the session file's `update`), what is
         # new in it, and an update asked for here until the mod answers.
@@ -916,6 +922,8 @@ class App:
             self.last_aura = self.prefs.aura
         if self.prefs.beamAfter:
             self.last_minutes = self.prefs.beamAfter
+        if self.prefs.magicAfter is not False:
+            self.last_magic = self.prefs.magicAfter
         if final:
             self.pending.update(values)
             if self.save_job:
@@ -942,10 +950,16 @@ class App:
             self.prefs = cfg.load(self.path)
             self.last_aura = self.prefs.aura or self.last_aura
             self.last_minutes = self.prefs.beamAfter or self.last_minutes
+            if self.prefs.magicAfter is not False:
+                self.last_magic = self.prefs.magicAfter
             self.refresh()
         if self.grabbed is None:
             self.follow_session()
         self.root.after(POLL_MS, self.poll)
+
+    def magic_minutes(self):
+        """Cursor magic's minutes, or what they were when last on."""
+        return self.last_magic if self.prefs.magicAfter is False else self.prefs.magicAfter
 
     def set_remember(self, on):
         self.remember = on
@@ -972,7 +986,7 @@ class App:
         W, M = WIDTH, 18
         col = (W - 3 * M) / 2
         CAST = 100  # the character card's height
-        H = 528 + CAST + 14 + UPDATES + 14
+        H = 528 + CAST + 14 + MAGIC + 14 + UPDATES + 14
         self.bg = Image.new("RGBA", (round(W * u), round(H * u)), t.paper + (255,))
         self.portrait = portrait(self.art)
         draw_header(self.bg, t, u, self.portrait)
@@ -1036,8 +1050,26 @@ class App:
         self.add(Toggle(self, box(x + 16, y + 128, col - 32, 26), lambda: self.prefs.beamForAgents,
                         lambda v: self.change(beamForAgents=v), "When agents helped"), "beamForAgents")
 
+        # Cursor magic
+        my = top + 330 + 14
+        x, y = card(M, my, W - 2 * M, MAGIC, "まほう", "Cursor magic",
+                    ["When a round of work ends while you are elsewhere,", "she sends magic to your pointer, on any display."])
+        panel = x + 380
+        pw = W - 2 * M - 380 - 16
+
+        def on():
+            return self.prefs.magicAfter is not False
+
+        self.add(Toggle(self, box(panel, y + 14, 150, 26), on,
+                        lambda v: self.change(magicAfter=self.last_magic if v else False), "After rounds of"), "magicAfter")
+        self.add(Slider(self, box(panel + 152, y + 12, pw - 152 - 58, 30), *MAGIC_SHOWN, self.magic_minutes,
+                        lambda v, final: self.change(final, magicAfter=v), enabled=on), "magicAfter")
+        self.add(Label(self, box(panel + pw - 54, y + 14, 54, 26), lambda: f"{self.magic_minutes()} min", "bold", 13.5 * u,
+                       lambda: t.primaryDeep if on() else t.muted, "rm"), "magicAfter")
+        self.add(Button(self, box(panel + pw - 130, y + 52, 130, 30), "Send one now", lambda: say("magic")))
+
         # Updates
-        uy = top + 330 + 14
+        uy = my + MAGIC + 14
         x, y = card(M, uy, W - 2 * M, UPDATES, "アップデート", "Updates", [])
         self.add(Label(self, box(x + 16, y + 40, 330, 18), lambda: (
             "Once a day, a look at her newest version on GitHub." if self.prefs.checkUpdates

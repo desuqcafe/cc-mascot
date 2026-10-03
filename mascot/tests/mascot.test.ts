@@ -247,6 +247,45 @@ test('a broken settings file is the defaults', async ($, on) => {
   expect(file.last()).toBe('beam')
 })
 
+test('a round of the magicAfter minutes calls the pointer as it settles; off, none does', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on, { magicAfter: 1 })
+  turnBottoms(on)
+
+  await $.turn.start({ text: 'quick', turnId: 't1' })
+  await clock.advance(59_000)
+  await $.turn.complete(ended('t1'))
+  expect(disk.last()!.frame).toBe('happy')
+  expect(disk.last()!.call).toBeUndefined()
+  await clock.advance(3_000)
+
+  await $.turn.start({ text: 'a minute', turnId: 't2' })
+  await clock.advance(60_000)
+  await $.turn.complete(ended('t2'))
+  expect(disk.last()!.call).toEqual({ at: 123_000 })
+  // It stays in the file: the overlay sends a call once per new `at`.
+  await clock.advance(3_600)
+  expect(disk.last()!.frame).toBe('idle')
+  expect(disk.last()!.call).toEqual({ at: 123_000 })
+})
+
+test('cursor magic is off by default; 0 minutes is every round', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on)
+  turnBottoms(on)
+
+  await $.turn.start({ text: 'long', turnId: 't1' })
+  await clock.advance(60 * 60_000)
+  await $.turn.complete(ended('t1'))
+  expect(disk.last()!.call).toBeUndefined()
+
+  await mascot($, 'magic after 0')
+  await clock.advance(3_000)
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await $.turn.complete(ended('t2'))
+  expect(disk.last()!.call).toEqual({ at: 3_604_000 })
+})
+
 test('a subagent ending with no new turn settles to happy after a short wait', async ($, on) => {
   const clock = mock.clock(on)
   const file = moodFile(on)
@@ -556,6 +595,23 @@ test('/mascot beam fires her beam, then she goes back to what she was doing', as
   expect((await mascot($, 'beam me')).text).toContain('Usage: /mascot')
 })
 
+test('/mascot magic and the settings window send a test call to the pointer', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on)
+  const proc = overlayProcess(on)
+
+  expect((await mascot($, 'magic')).text).toBe('Magic sent to your pointer!')
+  expect(disk.last()!.call).toEqual({ at: 1_000, test: true })
+  expect(disk.last()!.frame).toBe('idle') // she goes on as she was
+
+  await mascot($, 'settings')
+  await clock.advance(500)
+  proc.say('magic\n')
+  await clock.advance(10)
+  expect(disk.last()!.call).toEqual({ at: 1_500, test: true })
+  expect((await mascot($, 'magic now')).text).toContain('Usage: /mascot')
+})
+
 test('a right-click on the overlay hides it for the mod too', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000 })
   const disk = sessionFiles(on)
@@ -677,6 +733,11 @@ test("/mascot size, calm, aura and beam change every mascot's settings", async (
   expect((await mascot($, 'aura 400k 300k 500k')).text).toContain('Aura takes three token counts going up')
   expect((await mascot($, 'beam after 10')).text).toBe('Rounds of work of 10 min or more end in the beam.')
   expect((await mascot($, 'beam agents off')).text).toContain('only when long')
+  expect((await mascot($, 'magic after')).text).toBe('No cursor magic. /mascot magic after <minutes>|never|default.')
+  expect((await mascot($, 'magic after 5min')).text).toBe(
+    'Rounds of work of 5 min or more send magic to your pointer when you are elsewhere.',
+  )
+  expect((await mascot($, 'magic after 500')).text).toContain('Magic after takes minutes (0 to 120)')
   expect(disk.settings()).toEqual({
     note: 'mine', // what else the file holds stays
     size: 333,
@@ -684,7 +745,12 @@ test("/mascot size, calm, aura and beam change every mascot's settings", async (
     aura: [250_000, 1_200_000, 2_000_000],
     beamAfter: 10,
     beamForAgents: false,
+    magicAfter: 5,
   })
+  expect((await mascot($, 'magic after never')).text).toBe('No cursor magic.')
+  expect(disk.settings()).not.toHaveProperty('magicAfter')
+  await mascot($, 'magic after 0')
+  expect(disk.settings()).toMatchObject({ magicAfter: 0 }) // every round, not off
 
   // A default takes its key out of the file.
   await mascot($, 'size normal')

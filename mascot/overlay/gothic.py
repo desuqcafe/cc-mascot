@@ -24,6 +24,8 @@ of Miku's concert. Same roles, her own shapes and motion:
            there; she fires hollow stitched hearts and a swarm of bats,
            crimson rays and a shockwave behind her, the call on a banner
            with bat wings; petals drift down after.
+  call     a glint flies to the pointer trailing petals and bats, roses
+           burst there, two bats and a stitched heart circle it.
 
 Everything takes its colors from the look (`fx.MAIN`...) when drawn, so a
 character's theme recolors it; positions are shares of her frame, as in
@@ -793,6 +795,12 @@ def beam(w, h, t, age):
             if pulse(q / 0.6):
                 draws.append(Draw("star_" + ("accent", "main", "accent")[i], x * w, y * h, 0.3 + 0.6 * pulse(q / 0.6), pulse(q / 0.6), 25 * q))
     return draws
+
+
+def magic(start, target, flight, age, t, ended=None, calm=False):
+    """Her call to the pointer: Miku's flight in her shapes (a silver glint
+    trailing petals, roses bursting), its notes flapping bats."""
+    return fx._magic(start, target, flight, age, t, ended, calm, note=lambda k, tint: _bat(t, k, tint))
 
 
 PLACEMENTS = {"thinking": thinking, "working": working, "waiting": waiting, "worried": worried, "sleepy": sleepy,

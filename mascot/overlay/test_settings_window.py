@@ -78,10 +78,10 @@ class Window(unittest.TestCase):
         return [w for w in self.app.widgets if isinstance(w, kind)][n]
 
     def test_it_draws_at_the_displays_scale(self):
-        self.assertEqual(self.app.image().size, (sw.WIDTH, 756))
+        self.assertEqual(self.app.image().size, (sw.WIDTH, 866))
         big = sw.App(self.state, MIKU, show=False, scale=1.5)
         try:
-            self.assertEqual(big.image().size, (round(sw.WIDTH * 1.5), 1134))
+            self.assertEqual(big.image().size, (round(sw.WIDTH * 1.5), 1299))
         finally:
             big.root.destroy()
 
@@ -158,6 +158,21 @@ class Window(unittest.TestCase):
         self.assertFalse(minutes.enabled)
         click(self.app, toggle)
         self.assertEqual(saved(self.app), {"beamAfter": sw.BEAM_SHOWN[1]})
+
+    def test_cursor_magic_after_rounds_of(self):
+        toggle = next(w for w in self.app.widgets if isinstance(w, sw.Toggle) and "magicAfter" in w.keys)
+        minutes = next(w for w in self.app.widgets if isinstance(w, sw.Slider) and "magicAfter" in w.keys)
+        self.assertFalse(minutes.enabled)  # off by default
+        click(self.app, toggle)
+        self.assertEqual(saved(self.app), {"magicAfter": sw.MAGIC_ON})
+        x, y, w, h = minutes.box
+        minutes.press(x + 11, y + h / 2)
+        minutes.release(x + 11, y + h / 2)
+        self.assertEqual(saved(self.app), {"magicAfter": 0})  # every round: still on
+        click(self.app, toggle)
+        self.assertEqual(saved(self.app), {})
+        click(self.app, toggle)
+        self.assertEqual(saved(self.app), {"magicAfter": 0})
 
     def test_reset_brings_back_the_defaults(self):
         cfg.save(self.app.path, size=300, calm=True)
@@ -263,13 +278,18 @@ class Updates(unittest.TestCase):
         self.assertFalse(self.offer().enabled)  # nothing to offer
 
     def test_turning_the_check_on_asks_the_mod_to_look_now(self):
-        toggle = [w for w in self.app.widgets if isinstance(w, sw.Toggle)][4]
+        toggle = next(w for w in self.app.widgets if isinstance(w, sw.Toggle) and "checkUpdates" in w.keys)
         click(self.app, toggle)
         self.assertEqual(saved(self.app), {"checkUpdates": True})
         self.assertEqual(self.said, ["check"])
         click(self.app, toggle)
         self.assertEqual(saved(self.app), {})
         self.assertEqual(self.said, ["check"])  # off: nothing to look at
+
+    def test_send_one_now_asks_the_mod_for_her_call(self):
+        click(self.app, next(w for w in self.app.widgets if isinstance(w, sw.Button) and w.words == "Send one now"))
+        self.assertEqual(self.said, ["magic"])
+        self.assertFalse(os.path.exists(self.app.path))  # a try, not a setting
 
     def test_a_newer_version_is_offered_and_its_update_followed(self):
         self.session({"version": "0.15.0", "route": "marketplace", "latest": "0.16.0"})

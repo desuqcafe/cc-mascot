@@ -29,12 +29,12 @@ def raw(path):
 class Load(unittest.TestCase):
     def test_no_file_is_todays_behaviour(self):
         self.assertEqual(cfg.load(a_file()), cfg.DEFAULTS)
-        self.assertEqual(cfg.DEFAULTS, (420, False, (300_000, 400_000, 500_000), 2, True, False))
+        self.assertEqual(cfg.DEFAULTS, (420, False, (300_000, 400_000, 500_000), 2, True, False, False))
 
     def test_it_reads_what_was_set(self):
         path = a_file({"size": 560, "calm": True, "aura": [200_000, 250_000, 900_000], "beamAfter": 10, "beamForAgents": False,
-                       "checkUpdates": True})
-        self.assertEqual(cfg.load(path), (560, True, (200_000, 250_000, 900_000), 10, False, True))
+                       "magicAfter": 3, "checkUpdates": True})
+        self.assertEqual(cfg.load(path), (560, True, (200_000, 250_000, 900_000), 10, False, 3, True))
         self.assertEqual(cfg.load(a_file({"checkUpdates": "yes"})).checkUpdates, False)
         self.assertEqual(cfg.load(a_file({"aura": False, "beamAfter": False})).aura, False)
         self.assertEqual(cfg.load(a_file({"aura": False, "beamAfter": False})).beamAfter, False)
@@ -45,6 +45,14 @@ class Load(unittest.TestCase):
         self.assertEqual(cfg.load(a_file({"size": True, "calm": True})), cfg.DEFAULTS._replace(calm=True))
         for aura in ([1, 2], [300_000, 300_000, 400_000], [5_000, 20_000, 30_000], "off", None):
             self.assertIsNone(cfg.check("aura", aura), aura)
+
+    def test_cursor_magic_takes_minutes_from_zero(self):
+        self.assertEqual(cfg.check("magicAfter", 0), 0)  # every round
+        self.assertEqual(cfg.check("magicAfter", 4.6), 5)
+        self.assertIs(cfg.check("magicAfter", False), False)
+        for value in (-1, 121, True, "5", None):
+            self.assertIsNone(cfg.check("magicAfter", value), value)
+        self.assertEqual(cfg.load(a_file({"magicAfter": 0})).magicAfter, 0)
 
     def test_a_broken_file_is_no_file(self):
         self.assertEqual(cfg.load(a_file("{size: 3")), cfg.DEFAULTS)

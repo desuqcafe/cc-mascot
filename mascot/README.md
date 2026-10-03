@@ -27,6 +27,23 @@ A tag under her feet names the session's project (numbered, `app ·1`,
   session alone.
 - `/mascot beam` fires her beam (below) on demand, then she goes back to what
   she was doing.
+- Cursor magic (off by default; `/mascot magic after MINUTES`): a round of
+  work that lasted that long ends with her sending magic to your mouse
+  pointer, on whichever display it is. A star leaves her heart hands
+  trailing sparkles and notes and flies to the pointer on an arc, homing in
+  as you move it. It bursts there, then two notes and a heart circle the
+  pointer, following it, until you click (or 6 s). Hidden, she sends it
+  all the same: sparkles gather at the pointer.
+  - She sends it only when you are elsewhere. If her session's terminal is
+    the window in front, it is dropped. When that terminal holds other
+    sessions too, it is dropped only when the window's title is her tab's.
+  - Away (no input for 20 s), she waits until you are back. She also waits
+    while Windows holds notifications back (a fullscreen game or video, a
+    presentation) and while the pointer is hidden.
+  - It flies in a window of its own that clicks pass through and that never
+    takes the focus.
+  - `/mascot magic` sends one now, to try it (so does the settings window's
+    "Send one now").
 - `/mascot settings` opens the settings window; the other settings commands
   are below.
 - `/mascot update` updates her the way she was installed: `claude plugin
@@ -79,6 +96,7 @@ in `~/.claude/mascot/settings.json`, which holds only what you changed.
 | `/mascot aura [A B C\|off\|default]` | The context at which her aura's three levels start, going up (`300k 400k 500k` by default; `1.2M` works too), or no aura. |
 | `/mascot beam after [MINUTES\|never\|default]` | How long a round of work lasts before it ends in the beam instead of happy (2 minutes; up to 120), or never. |
 | `/mascot beam agents [on\|off]` | Whether a round that used subagents or background agents ends in the beam too (on). |
+| `/mascot magic after [MINUTES\|never\|default]` | How long a round of work lasts before its end sends magic to your pointer when you are elsewhere (0 for every round; up to 120), or never (the default). |
 | `/mascot updates [on\|off]` | Look for a newer version once a day (off): one read of this plugin's `plugin.json` on GitHub, nothing sent. When there is one, her hover card says so and the settings window offers it. With no value, it also says her version. |
 | `/mascot reset` | Every setting back to its default. |
 
@@ -90,7 +108,8 @@ The settings window has the same settings in the character's own colors
 (Miku's teal and pink; `frames/<character>/theme.json`): her character (a
 tile for each, in her colors, and "Remember for this project"), her size
 with a preview of her at it, calm mode, the aura's three thresholds on one
-track, the beam, and updates (her version, what is new in it, the daily
+track, the beam, cursor magic (with a "Send one now" to try it), and
+updates (her version, what is new in it, the daily
 check, and an Update button when a newer version is out, following the
 update as it runs). A change is saved at once, and a change made elsewhere
 (a command, the file) shows in it within a second. Running `/mascot
