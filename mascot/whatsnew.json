@@ -1,4 +1,7 @@
 {
+  "0.16.4": [
+    "She keeps working while Claude watches for something to finish, rather than going idle too early."
+  ],
   "0.16.3": [
     "Smooth sparkles: her aura's sparkles can move as smoothly as her symbols. Off by default: turn it on in the Calm mode card or with /mascot smooth. Her sparkles are lighter to draw, too."
   ],

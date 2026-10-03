@@ -48,9 +48,14 @@ const ENDLESS_COMMANDS = [
   /--watch\b|\b(cargo|dotnet)\s+watch\b|\binotifywait\b.*\s-m\b/,
   /\btail\s+(-\w+\s+)*-\w*[fF]\b|\bGet-Content\b.*\s-Wait\b/i,
   /\bdocker(-compose|\s+compose)\s+up\b(?!.*\s(-d|--detach)\b)/,
-  /\bwhile\s+(true|:)\s*[;\n]/,
 ]
-const isEndless = (command: string) => ENDLESS_COMMANDS.some(pattern => pattern.test(command))
+// A bare forever loop runs until stopped; one that breaks or exits on its
+// own (a poll, a watch waiting for a line, as a monitor's script is) ends.
+const FOREVER_LOOP = /\bwhile\s+(true|:)\s*[;\n]/
+const ENDS_ITSELF = /\b(break|exit)\b/
+const isEndless = (command: string) =>
+  ENDLESS_COMMANDS.some(pattern => pattern.test(command)) ||
+  (FOREVER_LOOP.test(command) && !ENDS_ITSELF.test(command))
 // Tools that wait on the person: their whole run is waiting.
 const ASKING_TOOLS = ['AskUserQuestion', 'ExitPlanMode']
 // The hover card: how soon after an event it refreshes, how often on its own

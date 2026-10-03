@@ -241,6 +241,7 @@ test('servers, watchers and work from before the round do not hold it open', asy
     'docker compose up',
     'tsc --watch',
     'Get-Content app.log -Wait',
+    'while true; do date >> beat.log; sleep 5; done',
   ]
 
   await $.turn.start({ text: 'serve it', turnId: 't1' })
@@ -256,6 +257,9 @@ test('servers, watchers and work from before the round do not hold it open', asy
     'until grep -q "Ready" dev.log; do sleep 0.5; done',
     'npm run build && npm test',
     'pytest -x',
+    // A monitor's poll: a forever loop that breaks out once its line shows.
+    'while true; do grep -q "round 1 done" out.txt && break; sleep 60; done',
+    'while :\ndo\n  test -f done.flag && exit 0\n  sleep 1\ndone',
   ]
   for (const [i, command] of ending.entries()) {
     await $.turn.start({ text: 'wait on it', turnId: `w${i}` })
