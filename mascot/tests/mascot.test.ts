@@ -869,7 +869,7 @@ test('the settings window picks the character, for the project or this session a
   expect(proc.starts.filter(argv => /mascot_overlay\.py$/.test(argv[1] ?? '')).length).toBe(1)
 })
 
-test("/mascot size, calm, aura and beam change every mascot's settings", async ($, on) => {
+test("/mascot size, calm, smooth, aura and beam change every mascot's settings", async ($, on) => {
   mock.clock(on)
   const disk = sessionFiles(on, { note: 'mine' })
   const proc = overlayProcess(on)
@@ -880,6 +880,9 @@ test("/mascot size, calm, aura and beam change every mascot's settings", async (
   expect((await mascot($, 'size 9000')).text).toContain('Size takes')
   expect((await mascot($, 'calm on')).text).toBe('Calm mode on: no glitch, particles, flicker or flashes.')
   expect((await mascot($, 'calm maybe')).text).toBe('Calm takes on or off.')
+  expect((await mascot($, 'smooth')).text).toContain('Smooth sparkles off: her sparkles move in step')
+  expect((await mascot($, 'smooth on')).text).toContain('Smooth sparkles on: her sparkles move as smoothly as her symbols')
+  expect((await mascot($, 'smooth please')).text).toBe('Smooth takes on or off.')
   expect((await mascot($, 'aura 250k 1.2M 2000000')).text).toBe('Aura from 250k, 1.2M, 2M tokens of context.')
   expect((await mascot($, 'aura 400k 300k 500k')).text).toContain('Aura takes three token counts going up')
   expect((await mascot($, 'beam after 10')).text).toBe('Rounds of work of 10 min or more end in the beam.')
@@ -893,6 +896,7 @@ test("/mascot size, calm, aura and beam change every mascot's settings", async (
     note: 'mine', // what else the file holds stays
     size: 333,
     calm: true,
+    smooth: true,
     aura: [250_000, 1_200_000, 2_000_000],
     beamAfter: 10,
     beamForAgents: false,
@@ -928,12 +932,13 @@ test("/mascot size, calm, aura and beam change every mascot's settings", async (
 
 test('/mascot settings reads what was set by hand, valid values only', async ($, on) => {
   mock.clock(on)
-  sessionFiles(on, { size: 300, calm: 'yes', aura: [1, 2, 3] })
+  sessionFiles(on, { size: 300, calm: 'yes', smooth: 2, aura: [1, 2, 3] })
   overlayProcess(on)
 
   const text = (await mascot($, 'settings')).text
   expect(text).toContain('Size: 300 px (small).')
   expect(text).toContain('Calm mode off.')
+  expect(text).toContain('Smooth sparkles off')
   expect(text).toContain('Aura from 300k, 400k, 500k tokens of context.')
 })
 

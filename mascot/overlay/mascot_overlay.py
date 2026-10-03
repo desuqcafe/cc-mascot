@@ -483,6 +483,28 @@ def read_state(path=None):
     )
 
 
+_peers = {}  # another session's file -> ((mtime, size), its SessionState)
+
+
+def peer_state(path):
+    """Another session's SessionState, read again only when its file has
+    changed: every overlay looks at every session every 2 s (limits, tags),
+    and most of them have not been written since."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        _peers.pop(path, None)
+        return None
+    stamp = (st.st_mtime_ns, st.st_size)
+    seen = _peers.get(path)
+    if seen and seen[0] == stamp:
+        return seen[1]
+    state = read_state(path)
+    if state:  # one caught half written is read again next time
+        _peers[path] = (stamp, state)
+    return state
+
+
 def read_all_choice():
     return choice_of(read_json(ALL_PATH), "visible", "at")
 
@@ -1014,7 +1036,7 @@ def shown_peers():
         holder = read_json(os.path.join(SLOTS_DIR, name))
         if not holder or not is_alive(holder.get("pid")) or not isinstance(holder.get("key"), str):
             continue
-        state = read_state(os.path.join(SESSIONS_DIR, f"{holder['key']}.json"))
+        state = peer_state(os.path.join(SESSIONS_DIR, f"{holder['key']}.json"))
         peers.append((int(match.group(1)), state.info.get("project") if state else None))
     return peers
 
@@ -1026,12 +1048,13 @@ def others_limits():
     except OSError:
         return []
     readings = []
-    for name in names:
-        path = os.path.join(SESSIONS_DIR, name)
-        if name.endswith(".json") and path != SESSION_PATH:
-            state = read_state(path)
-            if state and isinstance(state.info.get("limits"), list):
-                readings.append(state.info["limits"])
+    paths = [os.path.join(SESSIONS_DIR, name) for name in names if name.endswith(".json")]
+    for path in paths:
+        state = peer_state(path) if path != SESSION_PATH else None
+        if state and isinstance(state.info.get("limits"), list):
+            readings.append(state.info["limits"])
+    for gone in _peers.keys() - set(paths):  # ended sessions' files
+        del _peers[gone]
     return readings
 
 
@@ -1083,7 +1106,8 @@ def report(line):
 STILL_TICK_MS = 1000  # nothing moving: a new mood or tag redraws her at once
 # Her status (sparkles, a flickering light) moves at 12 fps, on twos like
 # anime itself, in step with her rigged frames: its steps are her frames'
-# steps, so it adds no redraws of its own.
+# steps, so it adds no redraws of its own. Smooth (a setting), it steps with
+# a moving symbol instead: 36 fps over 12 fps frames, still no extra redraws.
 STATUS_FPS = 12
 # A tick Tk fires a hair early still counts as the step it was due for.
 STEP_SLACK = 0.002
@@ -1099,6 +1123,12 @@ def tick_rate(fps, frame_count, wanted):
     if frame_count < 2:
         return wanted
     return fps * max(1, math.ceil(wanted / fps))
+
+
+def status_rate(tick, busy, smooth):
+    """How many steps a second her status moves at: STATUS_FPS; smooth (a
+    setting), at the tick's own rate while a symbol redraws her anyway."""
+    return tick if smooth and busy else STATUS_FPS
 
 
 def step_of(clock, rate):
@@ -1265,7 +1295,7 @@ def run_window(parent, starter):
         sprites.update(fx.build_sprites(HEIGHT))
         state["frame"] = -1
 
-    def draw(frame, mood, t, age, clock):
+    def draw(frame, mood, t, age, clock, status_fps):
         height = fx.PAD_TOP + frame.height + fx.UNDER_GAP + state["tag"].height
         act = state["act"]
         if act and act.kind != "channel":
@@ -1279,10 +1309,11 @@ def run_window(parent, starter):
             state["margin"] = 0
             window.show(image, *corner_at())
             return
-        # Her status moves at STATUS_FPS, on her art's clock: while a symbol
-        # redraws her at 36, the same look is drawn again rather than worked
-        # out anew, and it is worked out anew as her frame changes.
-        step = (id(frame), step_of(clock, STATUS_FPS), state["status"], state["status_was"], height, calm())
+        # Her status moves at `status_fps` on her art's clock, STATUS_FPS
+        # unless smooth: while a symbol redraws her at 36, the same look is
+        # drawn again rather than worked out anew, and it is worked out anew
+        # as her frame changes.
+        step = (id(frame), status_fps, step_of(clock, status_fps), state["status"], state["status_was"], height, calm())
         if dressed["step"] != step:
             dressed["step"] = step
             dressed["look"] = fx.dress(frame, state["status"], state["status_was"], t - state["status_since"], t, height,
@@ -1357,10 +1388,11 @@ def run_window(parent, starter):
         busy = (state["act"] is not None or state["carry"] is not None or state["celebration"] is not None
                 or fx.moving(mood, age))
         rate = tick_rate(fps, len(frames), fx.ANIMATE_FPS if busy else STATUS_FPS if status_moving else 0)
+        status_fps = status_rate(rate, busy, state["prefs"].smooth and not calm())
         index = step_of(clock, fps) % len(frames)
         if busy or status_moving or index != state["frame"] or state["dirty"]:
             state["frame"], state["dirty"] = index, False
-            draw(frames[index], mood, t, age, clock)
+            draw(frames[index], mood, t, age, clock, status_fps)
         state["tick"] = root.after(next_tick_ms(clock, rate), animate)
 
     def celebrate(t):

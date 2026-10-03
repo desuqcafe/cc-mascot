@@ -1361,6 +1361,22 @@ def glitch(frame, amount, t):
     return out
 
 
+_FADES = {}  # alpha -> its lookup table, as point() would round it
+FADES_KEPT = 4096  # her draws' alphas repeat: about 800 to 1000 in all
+
+
+def _fade(alpha):
+    """The table that scales an alpha channel by `alpha`. Point() given a
+    function calls it for all 256 levels every time; draws' alphas come
+    back (they are worked out from her art's clock), so each is made once."""
+    lut = _FADES.get(alpha)
+    if lut is None:
+        if len(_FADES) >= FADES_KEPT:
+            _FADES.clear()
+        lut = _FADES[alpha] = bytes(round(a * alpha) for a in range(256))
+    return lut
+
+
 def paint(out, draws, sprites, at=None):
     """The sprites `draws` asks for onto `out`, a canvas as compose() makes
     (frame coordinates, offset by the pads), or one with the frame's top
@@ -1369,14 +1385,15 @@ def paint(out, draws, sprites, at=None):
     for d in draws:
         if d.scale <= 0.01 or d.alpha <= 0.01:
             continue
-        img = sprites[d.sprite]
+        img = sprite = sprites[d.sprite]
         if abs(d.scale - 1) > 0.01:
             img = img.resize((max(1, round(img.width * d.scale)), max(1, round(img.height * d.scale))), Image.BILINEAR)
         if abs(d.angle) > 0.5:
             img = img.rotate(d.angle, Image.BICUBIC, expand=True)
         if d.alpha < 0.99:
-            img = img.copy()
-            img.putalpha(img.getchannel("A").point(lambda a: a * d.alpha))
+            if img is sprite:  # a resize or a rotation made a new one already
+                img = img.copy()
+            img.putalpha(img.getchannel("A").point(_fade(d.alpha)))
         x, y = round(d.x + at[0] - img.width / 2), round(d.y + at[1] - img.height / 2)
         if x + img.width <= 0 or y + img.height <= 0 or x >= out.width or y >= out.height:
             continue

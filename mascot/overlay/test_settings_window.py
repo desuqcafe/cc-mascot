@@ -77,6 +77,9 @@ class Window(unittest.TestCase):
     def widget(self, kind, n=0):
         return [w for w in self.app.widgets if isinstance(w, kind)][n]
 
+    def toggle(self, key):
+        return next(w for w in self.app.widgets if isinstance(w, sw.Toggle) and key in w.keys)
+
     def test_it_draws_at_the_displays_scale(self):
         self.assertEqual(self.app.image().size, (sw.WIDTH, 866))
         big = sw.App(self.state, MIKU, show=False, scale=1.5)
@@ -125,15 +128,24 @@ class Window(unittest.TestCase):
         self.assertEqual(sum(widget.drawn is not before[id(widget)] for widget in self.app.widgets), 4)
 
     def test_calm_and_the_agents_toggle(self):
-        calm = self.widget(sw.Toggle, 0)
+        calm = self.toggle("calm")
         click(self.app, calm)
         self.assertEqual(saved(self.app), {"calm": True})
-        agents = self.widget(sw.Toggle, 3)
+        agents = self.toggle("beamForAgents")
         click(self.app, agents)
         self.assertEqual(saved(self.app), {"calm": True, "beamForAgents": False})
 
+    def test_smooth_sparkles_wait_on_calm_mode(self):
+        smooth = self.toggle("smooth")
+        click(self.app, smooth)
+        self.assertEqual(saved(self.app), {"smooth": True})
+        click(self.app, self.toggle("calm"))
+        self.assertFalse(smooth.enabled)  # calm draws no particles
+        self.assertIsNone(self.app.widget_at(*center(smooth)))  # greyed: it takes no click
+        self.assertEqual(saved(self.app), {"calm": True, "smooth": True})
+
     def test_the_aura_off_and_back_on_keeps_its_tiers(self):
-        aura, tiers = self.widget(sw.Toggle, 1), self.widget(sw.Tiers)
+        aura, tiers = self.toggle("aura"), self.widget(sw.Tiers)
         x, y, w, h = tiers.box
         # The first knob, dragged far right, stops short of the second.
         first = x + tiers._x(300_000)
@@ -148,7 +160,7 @@ class Window(unittest.TestCase):
         self.assertEqual(saved(self.app), {"aura": [390_000, 400_000, 500_000]})
 
     def test_the_beam_after_long_rounds(self):
-        toggle, minutes = self.widget(sw.Toggle, 2), self.widget(sw.Slider, 1)
+        toggle, minutes = self.toggle("beamAfter"), self.widget(sw.Slider, 1)
         x, y, w, h = minutes.box
         minutes.press(x + w - 11, y + h / 2)
         minutes.release(x + w - 11, y + h / 2)
@@ -160,7 +172,7 @@ class Window(unittest.TestCase):
         self.assertEqual(saved(self.app), {"beamAfter": sw.BEAM_SHOWN[1]})
 
     def test_cursor_magic_after_rounds_of(self):
-        toggle = next(w for w in self.app.widgets if isinstance(w, sw.Toggle) and "magicAfter" in w.keys)
+        toggle = self.toggle("magicAfter")
         minutes = next(w for w in self.app.widgets if isinstance(w, sw.Slider) and "magicAfter" in w.keys)
         self.assertFalse(minutes.enabled)  # off by default
         click(self.app, toggle)

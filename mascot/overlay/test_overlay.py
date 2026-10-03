@@ -273,6 +273,12 @@ class NextTick(unittest.TestCase):
             self.assertEqual(overlay.step_of(t, overlay.STATUS_FPS), overlay.step_of(t, 12))
             self.assertNotEqual(overlay.step_of(t, overlay.STATUS_FPS), overlay.step_of(t - 0.01, overlay.STATUS_FPS))
 
+    def test_smooth_her_status_steps_with_a_moving_symbol(self):
+        symbol = overlay.tick_rate(12, 36, fx.ANIMATE_FPS)
+        self.assertEqual(overlay.status_rate(symbol, True, False), overlay.STATUS_FPS)
+        self.assertEqual(overlay.status_rate(symbol, True, True), 36)  # every tick a symbol draws
+        self.assertEqual(overlay.status_rate(overlay.STATUS_FPS, False, True), overlay.STATUS_FPS)  # no extra redraws
+
     def test_a_tick_fired_a_little_early_counts_as_due(self):
         due = 5 / 12
         self.assertEqual(overlay.step_of(due - 0.001, 12), 5)
@@ -440,6 +446,18 @@ class SessionFile(unittest.TestCase):
         write(os.path.join(overlay.SESSIONS_DIR, "b.json"), {"frame": "idle", "info": {"limits": theirs}})
         write(os.path.join(overlay.SESSIONS_DIR, "c.json"), {"frame": "idle", "visible": False, "visibleAt": 1, "ended": True})
         self.assertEqual(overlay.others_limits(), [theirs])
+
+    def test_another_sessions_file_is_read_again_only_once_changed(self):
+        path = os.path.join(overlay.SESSIONS_DIR, "b.json")
+        write(path, {"frame": "idle", "info": {"project": "web"}})
+        first = overlay.peer_state(path)
+        self.assertIs(overlay.peer_state(path), first)  # unchanged: not read again
+        write(path, {"frame": "idle", "info": {"project": "api!"}})
+        os.utime(path, ns=(1, 1))
+        self.assertEqual(overlay.peer_state(path).info["project"], "api!")
+        os.remove(path)
+        self.assertIsNone(overlay.peer_state(path))
+        self.assertNotIn(path, overlay._peers)
 
     def test_a_clear_is_a_number(self):
         write(overlay.SESSION_PATH, {"frame": "idle", "cleared": 1234})

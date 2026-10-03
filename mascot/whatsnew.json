@@ -1,6 +1,9 @@
 {
+  "0.16.3": [
+    "Smooth sparkles: her aura's sparkles can move as smoothly as her symbols. Off by default: turn it on in the Calm mode card or with /mascot smooth. Her sparkles are lighter to draw, too."
+  ],
   "0.16.2": [
-    "Lighter and smoother: her sparkles and auras step with her own motion, symbols move evenly, and soft edges and glows blend exactly. Up to 40% less CPU while she works with warnings showing, and next to none while hidden."
+    "Smoother: her sparkles and auras step with her own motion, symbols move evenly, and soft edges and glows blend exactly. Much lighter while she works with warnings showing, and next to nothing while hidden."
   ],
   "0.16.1": [
     "She waits with Claude: a build, a test run or a monitor it is waiting on keeps her working, so happy and cursor magic come when it is really done."

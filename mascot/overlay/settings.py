@@ -6,6 +6,9 @@ one, so a slip in the file never breaks a mascot:
 
     size           her height in px, SIZE_RANGE (420)
     calm           no glitch, particles, flicker or flashes (false)
+    smooth         her status's particles move with her symbols, 36 fps
+                   over her 12 fps frames, rather than at 12: smoother,
+                   more CPU while one moves (false)
     aura           the context, in tokens, at which each of her aura's three
                    levels starts, ascending; false: no aura
                    ([300000, 400000, 500000])
@@ -28,9 +31,9 @@ from collections import namedtuple
 
 FILE = "settings.json"
 
-Settings = namedtuple("Settings", "size calm aura beamAfter beamForAgents magicAfter checkUpdates")
-DEFAULTS = Settings(size=420, calm=False, aura=(300_000, 400_000, 500_000), beamAfter=2, beamForAgents=True,
-                    magicAfter=False, checkUpdates=False)
+Settings = namedtuple("Settings", "size calm smooth aura beamAfter beamForAgents magicAfter checkUpdates")
+DEFAULTS = Settings(size=420, calm=False, smooth=False, aura=(300_000, 400_000, 500_000), beamAfter=2,
+                    beamForAgents=True, magicAfter=False, checkUpdates=False)
 
 SIZE_RANGE = (240, 640)
 SIZES = {"small": 300, "normal": 420, "large": 560}
@@ -47,7 +50,7 @@ def check(key, value):
     """`value` as the setting `key` takes it, or None when it is not a valid one."""
     if key == "size":
         return round(value) if _number(value, *SIZE_RANGE) else None
-    if key in ("calm", "beamForAgents", "checkUpdates"):
+    if key in ("calm", "smooth", "beamForAgents", "checkUpdates"):
         return value if isinstance(value, bool) else None
     if key == "aura":
         if value is False:

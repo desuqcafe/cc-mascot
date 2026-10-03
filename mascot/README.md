@@ -92,6 +92,7 @@ in `~/.claude/mascot/settings.json`, which holds only what you changed.
 | `/mascot settings` | Opens the settings window (below) and lists every setting. |
 | `/mascot size [small\|normal\|large\|PX]` | Her height: 300, 420 (the default) or 560 px, or any from 240 to 640. She grows or shrinks where she stands, feet kept in place. |
 | `/mascot calm [on\|off]` | Calm mode: no glitch, particles, flicker or flashes. Her symbols, the aura's color and the hologram's scanlines stay; she comes and goes in a plain fade, and the beam keeps its hearts and banner but not its flash or speed lines. Off by default. |
+| `/mascot smooth [on\|off]` | Smooth sparkles: her aura's sparkles, bits and flicker move as smoothly as her symbols, rather than in step with her drawn frames. It asks more of your computer while she works. Off by default; calm mode has no sparkles to smooth. |
 | `/mascot aura [A B C\|off\|default]` | The context at which her aura's three levels start, going up (`300k 400k 500k` by default; `1.2M` works too), or no aura. |
 | `/mascot beam after [MINUTES\|never\|default]` | How long a round of work lasts before it ends in the beam instead of happy (2 minutes; up to 120), or never. |
 | `/mascot beam agents [on\|off]` | Whether a round that used subagents or background agents ends in the beam too (on). |
@@ -106,9 +107,9 @@ never breaks a mascot.
 The settings window has the same settings in the character's own colors
 (Miku's teal and pink; `frames/<character>/theme.json`): her character (a
 tile for each, in her colors, and "Remember for this project"), her size
-with a preview of her at it, calm mode, the aura's three thresholds on one
-track, the beam, cursor magic (with a "Send one now" to try it), and
-updates (her version, what is new in it, the daily
+with a preview of her at it, calm mode and smooth sparkles, the aura's
+three thresholds on one track, the beam, cursor magic (with a "Send one
+now" to try it), and updates (her version, what is new in it, the daily
 check, and an Update button when a newer version is out, following the
 update as it runs). A change is saved at once, and a change made elsewhere
 (a command, the file) shows in it within a second. Running `/mascot
@@ -116,9 +117,8 @@ settings` again brings it forward; run from another session, the window
 reopens for that one (its character picks are that session's), where it
 stood.
 
-Calm mode is about what she shows, not about CPU: her rigged frames are
-most of the cost either way (measured: idle with every warning 7.6% of one
-core, calm 6.7%; working 19.5%, calm 16.6%).
+Calm mode is for comfort rather than speed, though it does make her a
+little lighter while warnings show.
 
 ## Moods
 

@@ -79,7 +79,8 @@ export type MascotUpdate = {
  * `~/.claude/mascot/settings.json`, every session's: written by /mascot, the
  * settings window or by hand, followed live by every overlay. A key left out
  * (or not valid) is its default: `size` her height in px (240-640, 420);
- * `calm` no glitch, particles, flicker or flashes (false); `aura` the context
+ * `calm` no glitch, particles, flicker or flashes (false); `smooth` her
+ * status's particles step with a moving symbol, 36 fps, not 12 (false); `aura` the context
  * tokens at which her aura's three levels start, ascending, or false for none
  * ([300000, 400000, 500000]); `beamAfter` the minutes a round of work lasts
  * before it ends in the beam (1-120), or false for never (2);
@@ -91,6 +92,7 @@ export type MascotUpdate = {
 export type MascotSettings = {
   size?: number
   calm?: boolean
+  smooth?: boolean
   aura?: [number, number, number] | false
   beamAfter?: number | false
   beamForAgents?: boolean

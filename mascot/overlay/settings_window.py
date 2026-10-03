@@ -25,8 +25,8 @@ says `magic`: the mod sends her call to the pointer at once, to try it.
 Everything in it is drawn with Pillow onto one Tk canvas, anime-sticker
 style like her symbols (soft edges, white borders, glows): a header with
 her portrait, the character card, then a card each for her size, calm
-mode, the aura, the beam, cursor magic and updates, with widgets of its own (`Slider`,
-`Tiers`, `Toggle`...). Layout is in logical px (`WIDTH` wide), times the
+mode (and smooth sparkles), the aura, the beam, cursor magic and updates,
+with widgets of its own (`Slider`, `Tiers`, `Toggle`...). Layout is in logical px (`WIDTH` wide), times the
 display's scale.
 """
 
@@ -506,11 +506,15 @@ class Toggle(Widget):
     """A pill switch: `get()`, `set(on)`; its knob slides over. `words`, if
     any, stand to its right and take the click too."""
 
-    def __init__(self, app, box, get, set, words=None, note=None):
+    def __init__(self, app, box, get, set, words=None, note=None, enabled=lambda: True):
         super().__init__(app, box)
-        self.get, self.set, self.words, self.note = get, set, words, note
+        self.get, self.set, self.words, self.note, self.is_enabled = get, set, words, note, enabled
         self.since = 0.0
         self.was = get()
+
+    @property
+    def enabled(self):
+        return self.is_enabled()
 
     def animating(self, now):
         return now - self.since < TOGGLE_S + 2 * FRAME_MS / 1000  # and its last frame
@@ -1024,6 +1028,9 @@ class App:
                     ["No glitch, particles, flicker or flashes.", "Her symbols and colors stay."])
         self.add(Toggle(self, box(x + col - 16 - 44, y + 14, 44, 24), lambda: self.prefs.calm,
                         lambda v: self.change(calm=v)), "calm")
+        self.add(Toggle(self, box(x + 16, y + 84, col - 32, 26), lambda: self.prefs.smooth,
+                        lambda v: self.change(smooth=v), "Smooth sparkles", "heavier while she works",
+                        enabled=lambda: not self.prefs.calm), "smooth", "calm")
 
         # The aura
         x2 = M + col + M

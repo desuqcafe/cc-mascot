@@ -101,6 +101,7 @@ type Settings = Required<{ [K in keyof MascotSettings]: Exclude<MascotSettings[K
 const DEFAULTS: Settings = {
   size: 420,
   calm: false,
+  smooth: false,
   aura: [300_000, 400_000, 500_000],
   beamAfter: 2,
   beamForAgents: true,
@@ -119,6 +120,7 @@ const inRange = (v: unknown, [low, high]: readonly [number, number]): v is numbe
 const checks: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined } = {
   size: v => (inRange(v, SIZE_RANGE) ? Math.round(v) : undefined),
   calm: v => (typeof v === 'boolean' ? v : undefined),
+  smooth: v => (typeof v === 'boolean' ? v : undefined),
   aura: v => {
     if (v === false) return false
     if (!Array.isArray(v) || v.length !== 3 || !v.every(t => inRange(t, AURA_RANGE))) return undefined
@@ -247,6 +249,7 @@ const loadSettings = async ($: EngineInterface): Promise<Settings> => {
   return {
     size: pick('size'),
     calm: pick('calm'),
+    smooth: pick('smooth'),
     aura: pick('aura'),
     beamAfter: pick('beamAfter'),
     beamForAgents: pick('beamForAgents'),
@@ -860,6 +863,10 @@ const describe = {
   },
   calm: (s: Settings) =>
     s.calm ? 'Calm mode on: no glitch, particles, flicker or flashes.' : 'Calm mode off.',
+  smooth: (s: Settings) =>
+    s.smooth
+      ? 'Smooth sparkles on: her sparkles move as smoothly as her symbols (heavier while she works).'
+      : 'Smooth sparkles off: her sparkles move in step with her drawn frames.',
   aura: (s: Settings) =>
     s.aura === false ? 'Aura off.' : `Aura from ${s.aura.map(fmtTokens).join(', ')} tokens of context.`,
   beamAfter: (s: Settings) =>
@@ -901,6 +908,11 @@ const settingsCommand = async ($: EngineInterface, words: string[]): Promise<str
     if (!value) return `${await now('calm')} /mascot calm on|off.`
     if (value !== 'on' && value !== 'off') return 'Calm takes on or off.'
     return set('calm', value === 'on')
+  }
+  if (verb === 'smooth' && !extra) {
+    if (!value) return `${await now('smooth')} /mascot smooth on|off.`
+    if (value !== 'on' && value !== 'off') return 'Smooth takes on or off.'
+    return set('smooth', value === 'on')
   }
   if (verb === 'aura') {
     if (!value) return `${await now('aura')} /mascot aura <3 token counts, as 300k 400k 500k>|off|default.`
@@ -949,6 +961,7 @@ const settingsCommand = async ($: EngineInterface, words: string[]): Promise<str
     await saveSettings($, {
       size: null,
       calm: null,
+      smooth: null,
       aura: null,
       beamAfter: null,
       beamForAgents: null,
@@ -983,7 +996,7 @@ export const register: Register = on => {
       description:
         "Show or hide this session's mascot (or every session's), pick its character, fire her beam, send magic to your pointer, update her, or change her settings",
       argumentHint:
-        '[show|hide] [all] | character [name] | beam | magic | update | settings | size | calm | aura | beam after | magic after | updates | reset',
+        '[show|hide] [all] | character [name] | beam | magic | update | settings | size | calm | smooth | aura | beam after | magic after | updates | reset',
       immediate: true,
     })
     // A reload keeps this session's choice; a new session takes the last one
@@ -1010,7 +1023,7 @@ export const register: Register = on => {
       '/mascot character [name] lists or picks the character for this project; /mascot beam fires her beam; ' +
       '/mascot magic sends magic to your pointer; ' +
       '/mascot update updates her to the newest version. ' +
-      'Settings, for every mascot: /mascot settings; size [small|normal|large|<px>]; calm [on|off]; ' +
+      'Settings, for every mascot: /mascot settings; size [small|normal|large|<px>]; calm [on|off]; smooth [on|off]; ' +
       'aura [<3 token counts>|off]; beam after [<minutes>|never]; beam agents [on|off]; ' +
       'magic after [<minutes>|never]; updates [on|off]; reset.'
     try {
