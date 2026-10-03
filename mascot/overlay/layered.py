@@ -12,7 +12,6 @@ activated (her call to the pointer, magic.py).
 import ctypes
 import ctypes.wintypes as wt
 
-from PIL import Image, ImageChops
 
 GWL_EXSTYLE = -20
 WS_EX_LAYERED = 0x80000
@@ -92,9 +91,11 @@ gdi32.DeleteDC.argtypes = [wt.HDC]
 
 
 def premultiplied_bgra(img):
-    """What a layered window takes: each color already multiplied by alpha."""
-    r, g, b, a = img.split()
-    return Image.merge("RGBA", (ImageChops.multiply(b, a), ImageChops.multiply(g, a), ImageChops.multiply(r, a), a)).tobytes()
+    """What a layered window takes: each color already multiplied by alpha,
+    blue first. Pillow's RGBa rounds c * a / 255 exactly, in half the time of
+    ImageChops.multiply, which rounded down half the pairs (soft edges and
+    glows came out a level dark)."""
+    return img.convert("RGBa").tobytes("raw", "BGRa")
 
 
 def popup():

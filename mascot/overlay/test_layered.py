@@ -1,5 +1,6 @@
-"""The layered window staying on top: an ordinary window that got above her
-is noticed, and she goes back on top without taking the focus.
+"""The layered window: the pixels it hands Windows, premultiplied exactly;
+staying on top: an ordinary window that got above her is noticed, and she
+goes back on top without taking the focus.
 
     python -m unittest discover -s overlay -p "test_*.py"
 """
@@ -8,6 +9,8 @@ import os
 import sys
 import tkinter as tk
 import unittest
+
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layered  # noqa: E402
@@ -28,6 +31,23 @@ def above(hwnd):
 def frame_of(widget):
     widget.update_idletasks()
     return user32.GetParent(widget.winfo_id()) or widget.winfo_id()
+
+
+class Premultiplied(unittest.TestCase):
+    def test_every_color_and_alpha_rounds_exactly_blue_first(self):
+        # Every (color, alpha) pair, the color in red, green and blue apart.
+        pairs = [(c, a) for a in range(256) for c in range(256)]
+        for channel in range(3):
+            pixels = bytearray()
+            for c, a in pairs:
+                rgb = [0, 0, 0]
+                rgb[channel] = c
+                pixels += bytes(rgb + [a])
+            got = layered.premultiplied_bgra(Image.frombytes("RGBA", (256, 256), bytes(pixels)))
+            for i, (c, a) in enumerate(pairs):
+                bgra = [0, 0, 0, a]
+                bgra[2 - channel] = round(c * a / 255)
+                self.assertEqual(tuple(got[4 * i:4 * i + 4]), tuple(bgra), (channel, c, a))
 
 
 class KeepOnTop(unittest.TestCase):
@@ -78,7 +98,7 @@ class TkSize(unittest.TestCase):
 
     def test_tk_window_inside_follows_each_size(self):
         for size in ((300, 420), (520, 640), (300, 420)):
-            self.assertTrue(self.window.show(layered.Image.new("RGBA", size, (0, 0, 0, 255)), 10, 10))
+            self.assertTrue(self.window.show(Image.new("RGBA", size, (0, 0, 0, 255)), 10, 10))
             self.root.update()
             self.assertEqual(size_of(self.window.hwnd), size)
             self.assertEqual(size_of(self.root.winfo_id()), size)

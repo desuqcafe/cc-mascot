@@ -86,6 +86,18 @@ test('the mood follows turns and tool calls, holding error and happy for 3s', as
   expect(file.last()).toBe('idle')
 })
 
+test('a frame she already shows is not written again at every tool call', async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  const file = moodFile(on)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('tool.call', () => ({ result: 'ok', text: 'ok' }))
+
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  const before = file.all.length
+  for (const name of ['a.md', 'b.md', 'c.md', 'd.md']) await $.tool.call({ tool: 'Read', file_path: name })
+  expect(file.all.slice(before)).toEqual(['working'])
+})
+
 test('a subagent finishing does not make the mascot happy', async ($, on) => {
   mock.clock(on)
   const file = moodFile(on)

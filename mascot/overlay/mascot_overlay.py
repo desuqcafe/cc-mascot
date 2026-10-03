@@ -1080,23 +1080,39 @@ def report(line):
 # --------------------------------------------------------------- window
 
 
-TICK_MS = round(1000 / fx.ANIMATE_FPS)  # while a symbol or her glitch moves
 STILL_TICK_MS = 1000  # nothing moving: a new mood or tag redraws her at once
-# Only her status moving (sparkles, a flickering light): it moves at 12 fps,
-# on twos like anime itself, in step with her rigged frames, so it adds no
-# redraws of the window (each costs 3-4 ms, the drawing itself 1-2).
-STATUS_TICK_MS = 83
+# Her status (sparkles, a flickering light) moves at 12 fps, on twos like
+# anime itself, in step with her rigged frames: its steps are her frames'
+# steps, so it adds no redraws of its own.
+STATUS_FPS = 12
+# A tick Tk fires a hair early still counts as the step it was due for.
+STEP_SLACK = 0.002
 
 
-def next_tick_ms(age, fps, frame_count, cap):
-    """When to draw next: when the next frame is due, so every frame of a
-    loop shows equally long (fixed 33 ms ticks would hold 12 fps frames for
-    67 and 100 ms by turns), and no later than `cap` ms (TICK_MS while a
-    symbol moves, STATUS_TICK_MS while only her status does)."""
+def tick_rate(fps, frame_count, wanted):
+    """How many steps a second she is drawn at, on her art's clock, for
+    something moving at `wanted` fps (a symbol: ANIMATE_FPS; her status:
+    STATUS_FPS; 0 for her frames alone): a multiple of her frames' `fps`, so
+    every frame change is one of its steps and every frame of a loop shows
+    equally long. Symbols over 12 fps frames move at 36, evenly (ticks
+    capped at 33 ms between frame changes moved them 33, 33, 17 ms apart)."""
     if frame_count < 2:
-        return cap
-    due = (math.floor(age * fps) + 1) / fps - age
-    return max(1, min(cap, math.ceil(due * 1000)))
+        return wanted
+    return fps * max(1, math.ceil(wanted / fps))
+
+
+def step_of(clock, rate):
+    """Which step of `rate` a second her art's `clock` is in."""
+    return math.floor((clock + STEP_SLACK) * rate)
+
+
+def next_tick_ms(clock, rate):
+    """When to draw next: the next step of `rate` on her art's clock;
+    STILL_TICK_MS when nothing moves (rate 0)."""
+    if not rate:
+        return STILL_TICK_MS
+    due = (step_of(clock, rate) + 1) / rate - clock
+    return max(1, min(STILL_TICK_MS, math.ceil(due * 1000)))
 
 
 def draw_rows(canvas, font, rows):
@@ -1249,7 +1265,7 @@ def run_window(parent, starter):
         sprites.update(fx.build_sprites(HEIGHT))
         state["frame"] = -1
 
-    def draw(frame, mood, t, age):
+    def draw(frame, mood, t, age, clock):
         height = fx.PAD_TOP + frame.height + fx.UNDER_GAP + state["tag"].height
         act = state["act"]
         if act and act.kind != "channel":
@@ -1263,9 +1279,10 @@ def run_window(parent, starter):
             state["margin"] = 0
             window.show(image, *corner_at())
             return
-        # Her status moves at 12 fps (STATUS_TICK_MS): while a symbol redraws
-        # her at 30, the same look is drawn again rather than worked out anew.
-        step = (id(frame), math.floor(t * 1000 / STATUS_TICK_MS), state["status"], state["status_was"], height, calm())
+        # Her status moves at STATUS_FPS, on her art's clock: while a symbol
+        # redraws her at 36, the same look is drawn again rather than worked
+        # out anew, and it is worked out anew as her frame changes.
+        step = (id(frame), step_of(clock, STATUS_FPS), state["status"], state["status_was"], height, calm())
         if dressed["step"] != step:
             dressed["step"] = step
             dressed["look"] = fx.dress(frame, state["status"], state["status_was"], t - state["status_since"], t, height,
@@ -1327,21 +1344,24 @@ def run_window(parent, starter):
             frames, fps = art.get("held", instead=(frames, fps))
             clock = t - carry.since
         if carry and frames:
-            carry.step(t, *velocity(t), frames[int(clock * fps) % len(frames)])
+            carry.step(t, *velocity(t), frames[step_of(clock, fps) % len(frames)])
             if carry.over(t):
                 state["carry"], state["dirty"] = None, True
         celebrate(t)
+        if not (frames and state["shown"]):
+            # Hidden (or her art not built): nothing to draw until a show,
+            # which draws her at once.
+            state["tick"] = root.after(STILL_TICK_MS, animate)
+            return
         status_moving = fx.status_moving(state["status"], state["status_was"], t - state["status_since"], calm())
         busy = (state["act"] is not None or state["carry"] is not None or state["celebration"] is not None
                 or fx.moving(mood, age))
-        moving = busy or status_moving
-        cap = TICK_MS if busy else STATUS_TICK_MS if status_moving else STILL_TICK_MS
-        if frames and state["shown"]:
-            index = int(clock * fps) % len(frames)
-            if moving or index != state["frame"] or state["dirty"]:
-                state["frame"], state["dirty"] = index, False
-                draw(frames[index], mood, t, age)
-        state["tick"] = root.after(next_tick_ms(age, fps, len(frames) if frames else 0, cap), animate)
+        rate = tick_rate(fps, len(frames), fx.ANIMATE_FPS if busy else STATUS_FPS if status_moving else 0)
+        index = step_of(clock, fps) % len(frames)
+        if busy or status_moving or index != state["frame"] or state["dirty"]:
+            state["frame"], state["dirty"] = index, False
+            draw(frames[index], mood, t, age, clock)
+        state["tick"] = root.after(next_tick_ms(clock, rate), animate)
 
     def celebrate(t):
         """Starts a new version's banner once she can show it (shown, not
@@ -1376,7 +1396,7 @@ def run_window(parent, starter):
     card_body = tk.Canvas(inner, bg=CARD_BG, highlightthickness=0, borderwidth=0)
     card_body.pack(anchor="w", pady=(4, 0))
     font = tkfont.Font(family=CARD_FONT[0], size=CARD_FONT[1])
-    hover = {"shown": False, "hide": None}
+    hover = {"shown": False, "hide": None, "refresh": None}  # the after() ids of its hiding and its next redraw
 
     def save_pos():
         if state["slot"] is not None:
@@ -1391,14 +1411,17 @@ def run_window(parent, starter):
                 state["since"] = max(state["since"], state["act"].since + fx.lock_in(state["act"].calm))
             redraw()
 
-    def update_status():
+    def update_status(drawn=True):
         """Her status from the session's figures (the limits are the
-        account's: any session may have read them last)."""
+        account's: any session may have read them last). Hidden, it waits:
+        `show` works it out (`drawn` False: without drawing her yet)."""
+        if not state["shown"]:
+            return
         status = status_of(state["info"], others_limits(), time.time() * 1000, state["prefs"].aura or ())
         if status != state["status"]:
             state["status_was"], state["status"] = state["status"], status
             state["status_since"] = time.monotonic()
-            if state["shown"]:
+            if drawn:
                 redraw()
 
     def update_tag():
@@ -1417,6 +1440,7 @@ def run_window(parent, starter):
             return
         state["shown"] = True
         load_art()
+        update_status(drawn=False)  # not followed while hidden
         state["slot"], took_over = claim_slot(parent)
         update_tag()
         state["pos"] = spot()
@@ -1467,13 +1491,20 @@ def run_window(parent, starter):
         else:
             leave(gone)
 
+    wanted = {"name": None, "folder": None}  # the character the mod wants, and her frames folder
+
     def follow_character():
         """A new character picked (/mascot character): she goes, the new
         one's art and look come in, and she comes back on the same spot.
         Shown again in the middle (the outro cut short), she goes again.
         Who comes back is settled as the outro ends: picked back while she
         went, she comes back as she was (no second outro)."""
-        folder = frames_of(state["character"])
+        if state["character"] != wanted["name"]:
+            # Looked up as the name changes, not at every poll: a listing of
+            # her frames folder (hundreds of files) was most of a hidden
+            # overlay's work.
+            wanted.update(name=state["character"], folder=frames_of(state["character"]))
+        folder = wanted["folder"]
         if not folder or os.path.normcase(folder) == os.path.normcase(os.path.normpath(FRAMES_DIR)):
             return
         if state["ending"] or playing("outro"):
@@ -1564,6 +1595,7 @@ def run_window(parent, starter):
         calls.send(start, sprites or fx.build_sprites(HEIGHT), calm())
 
     def draw_card():
+        hover["refresh"] = None
         if not hover["shown"]:
             return
         # The limits are the account's: another session may have read them since.
@@ -1576,7 +1608,7 @@ def run_window(parent, starter):
         card_size = card.winfo_reqwidth(), card.winfo_reqheight()
         x, y = card_spot(state["pos"], size(), card_size, state["screens"] or screens())
         card.geometry(f"+{x}+{y}")
-        root.after(500, draw_card)  # the turn's clock keeps running
+        hover["refresh"] = root.after(500, draw_card)  # the turn's clock keeps running
 
     def hover_start(_e):
         if hover["hide"]:
@@ -1591,6 +1623,11 @@ def run_window(parent, starter):
         if hover["hide"]:
             root.after_cancel(hover["hide"])
             hover["hide"] = None
+        if hover["refresh"]:
+            # Or shown again within half a second, a second loop of redraws
+            # would run beside this one (and a third...).
+            root.after_cancel(hover["refresh"])
+            hover["refresh"] = None
         hover["shown"] = False
         card.withdraw()
 

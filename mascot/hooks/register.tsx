@@ -773,7 +773,10 @@ const show = async (
       if (!opts.force && cur.holdUntil > now) return { ...cur, then: frame }
       return { frame, holdUntil: 0, then: frame }
     })
-    await publish($, next.frame)
+    // Called at every step of the main loop and every tool call (subagents'
+    // too): a frame she already shows is not written again (the card's
+    // refresh keeps the file fresh).
+    if (next.frame !== frameNow) await publish($, next.frame)
     if (opts.holdMs) {
       const until = next.holdUntil
       $.clock.after(opts.holdMs, () => {

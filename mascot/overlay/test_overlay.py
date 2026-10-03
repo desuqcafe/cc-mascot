@@ -16,6 +16,7 @@ import unittest
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import effects as fx  # noqa: E402
 import mascot_overlay as overlay  # noqa: E402
 
 
@@ -240,27 +241,42 @@ class FrameRates(unittest.TestCase):
 
 
 class NextTick(unittest.TestCase):
-    def test_ticks_when_the_next_frame_is_due(self):
-        self.assertEqual(overlay.next_tick_ms(0.0, 12, 36, overlay.TICK_MS), 33)  # due in 83 ms: capped while moving
-        self.assertEqual(overlay.next_tick_ms(0.0, 12, 36, overlay.STILL_TICK_MS), 84)  # nothing else moves: wait for it
-        self.assertEqual(overlay.next_tick_ms(0.070, 12, 36, overlay.TICK_MS), 14)  # frame 1 is due at 83.3 ms
-        self.assertEqual(overlay.next_tick_ms(1.0, 60, 36, overlay.TICK_MS), 17)  # 60 fps: every 16.7 ms
+    def test_steps_are_on_her_arts_clock(self):
+        self.assertEqual(overlay.tick_rate(12, 36, fx.ANIMATE_FPS), 36)  # a symbol over 12 fps frames
+        self.assertEqual(overlay.tick_rate(12, 36, overlay.STATUS_FPS), 12)  # her status: her frames' steps
+        self.assertEqual(overlay.tick_rate(12, 36, 0), 12)  # her frames alone
+        self.assertEqual(overlay.tick_rate(6, 4, overlay.STATUS_FPS), 12)
+        self.assertEqual(overlay.tick_rate(6, 1, fx.ANIMATE_FPS), fx.ANIMATE_FPS)  # a still picture
+        self.assertEqual(overlay.next_tick_ms(0.0, 36), 28)
+        self.assertEqual(overlay.next_tick_ms(0.070, 12), 14)  # frame 1 is due at 83.3 ms
+        self.assertEqual(overlay.next_tick_ms(1.0, 60), 17)  # 60 fps: every 16.7 ms
+        self.assertEqual(overlay.next_tick_ms(5.0, 0), overlay.STILL_TICK_MS)  # nothing moves
 
-    def test_every_frame_of_a_loop_shows_equally_long(self):
-        for cap in (overlay.TICK_MS, overlay.STATUS_TICK_MS, overlay.STILL_TICK_MS):
-            t, shown, last = 0.0, [], 0
+    def test_every_frame_shows_equally_long_and_symbols_move_evenly(self):
+        for wanted in (fx.ANIMATE_FPS, overlay.STATUS_FPS, 0):
+            rate = overlay.tick_rate(12, 36, wanted)
+            t, ticks, shown, last = 0.0, [], [], 0
             for _ in range(400):
-                t += overlay.next_tick_ms(t, 12, 36, cap) / 1000
-                index = int(t * 12)
+                t += overlay.next_tick_ms(t, rate) / 1000
+                ticks.append(t)
+                index = overlay.step_of(t, 12)
                 if index != last:
                     shown.append(t)
                     last = index
-            lengths = [b - a for a, b in zip(shown, shown[1:])]
-            self.assertLess(max(lengths) - min(lengths), 0.002, cap)
+            for times in (shown, ticks):
+                gaps = [b - a for a, b in zip(times, times[1:])]
+                self.assertLess(max(gaps) - min(gaps), 0.002, wanted)
 
-    def test_a_still_picture(self):
-        self.assertEqual(overlay.next_tick_ms(5.0, 6, 1, overlay.TICK_MS), overlay.TICK_MS)  # its symbol moves
-        self.assertEqual(overlay.next_tick_ms(5.0, 6, 1, overlay.STILL_TICK_MS), overlay.STILL_TICK_MS)
+    def test_her_status_steps_as_her_frame_changes(self):
+        for k in range(1, 50):
+            t = k / 12
+            self.assertEqual(overlay.step_of(t, overlay.STATUS_FPS), overlay.step_of(t, 12))
+            self.assertNotEqual(overlay.step_of(t, overlay.STATUS_FPS), overlay.step_of(t - 0.01, overlay.STATUS_FPS))
+
+    def test_a_tick_fired_a_little_early_counts_as_due(self):
+        due = 5 / 12
+        self.assertEqual(overlay.step_of(due - 0.001, 12), 5)
+        self.assertGreater(overlay.next_tick_ms(due - 0.001, 12), 80)  # the next one, not 1 ms later
 
 
 class Tag(unittest.TestCase):
