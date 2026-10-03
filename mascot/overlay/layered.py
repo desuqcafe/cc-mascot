@@ -13,6 +13,10 @@ from PIL import Image, ImageChops
 
 GWL_EXSTYLE = -20
 WS_EX_LAYERED = 0x80000
+WS_EX_TOPMOST = 0x8
+GW_HWNDPREV = 3
+HWND_TOPMOST = -1
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER = 0x1, 0x2, 0x10, 0x200
 ULW_ALPHA = 2
 AC_SRC_ALPHA = 1
 
@@ -37,6 +41,10 @@ user32.GetParent.restype = wt.HWND
 user32.GetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int]
 user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
 user32.SetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int, ctypes.c_ssize_t]
+user32.GetWindow.argtypes = [wt.HWND, wt.UINT]
+user32.GetWindow.restype = wt.HWND
+user32.IsWindowVisible.argtypes = [wt.HWND]
+user32.SetWindowPos.argtypes = [wt.HWND, wt.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.UINT]
 user32.GetDC.argtypes = [wt.HWND]
 user32.GetDC.restype = wt.HDC
 user32.ReleaseDC.argtypes = [wt.HWND, wt.HDC]
@@ -117,6 +125,20 @@ class LayeredWindow:
             return True
         self._layer()
         return update()
+
+    def keep_on_top(self):
+        """Puts the window back on top when a window that is not topmost
+        stands above it: Windows sometimes lets one (closing the Photos
+        viewer, then clicking a terminal, did), the window still flagged
+        topmost. Never takes the focus. Whether it had to."""
+        above = user32.GetWindow(self.hwnd, GW_HWNDPREV)
+        while above:
+            if user32.IsWindowVisible(above) and not user32.GetWindowLongPtrW(above, GWL_EXSTYLE) & WS_EX_TOPMOST:
+                user32.SetWindowPos(self.hwnd, wt.HWND(HWND_TOPMOST), 0, 0, 0, 0,
+                                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER)
+                return True
+            above = user32.GetWindow(above, GW_HWNDPREV)
+        return False
 
     def close(self):
         if self.dc:

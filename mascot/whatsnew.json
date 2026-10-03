@@ -1,4 +1,7 @@
 {
+  "0.15.1": [
+    "She stays on top: when Windows lets a window slip above her, she is back in front within a second."
+  ],
   "0.15.0": [
     "Updates: an Updates card here, /mascot update, and a banner for each new version.",
     "Install from the marketplace: /plugin marketplace add desuqcafe/cc-mascot."

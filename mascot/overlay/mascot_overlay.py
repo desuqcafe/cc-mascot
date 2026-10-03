@@ -119,6 +119,9 @@ SWEEP_EVERY_MS = 60_000
 TAG_EVERY_MS = 2000
 STATUS_EVERY_MS = 2000
 SCREENS_EVERY_MS = 2000
+# How often a shown mascot makes sure no ordinary window has got above her
+# (LayeredWindow.keep_on_top): a walk up the windows above hers.
+ON_TOP_EVERY_MS = 1000
 # settings.json is checked with the session file (every POLL_MS): a size
 # picked in the settings window shows at once. A stat costs microseconds.
 POLL_MS = 100
@@ -1565,6 +1568,10 @@ def run_window(parent, starter):
             return
         root.after(2000, watch_parent)
 
+    def stay_on_top():
+        if state["shown"] and not state["closed"]:
+            window.keep_on_top()
+
     def watch_settings():
         """Follows settings.json: calm and the aura at once; her size as soon
         as it is built (`resize`)."""
@@ -1726,6 +1733,7 @@ def run_window(parent, starter):
     every(STATUS_EVERY_MS, update_status)
     every(SWEEP_EVERY_MS, sweep)
     every(SCREENS_EVERY_MS, watch_screens)
+    every(ON_TOP_EVERY_MS, stay_on_top)
     try:
         root.mainloop()
     finally:
