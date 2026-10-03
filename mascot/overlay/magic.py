@@ -7,7 +7,8 @@ It goes at once, whatever window is in front and however long since you
 last touched the mouse: neither says where you are looking (a video on one
 display, the terminal active on the other). It waits only while a game
 runs in exclusive fullscreen or Windows is in presentation mode
-(`notifications_held`), and a test call (/mascot magic, the settings
+(`notifications_held`), or while the screen is dark or locked (presence.py:
+it lands as you come back), and a test call (/mascot magic, the settings
 window's button) not even then.
 
 It flies in a window of its own (layered.popup: clicks pass through it and

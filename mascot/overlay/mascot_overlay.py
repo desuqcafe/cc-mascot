@@ -46,7 +46,9 @@ version's banner plays (effects.updated): once, when the mod says a newer
 version than the last one run has loaded (the session file's `update`).
 When a long enough round of work ends, she sends magic to your pointer, on
 any display (the session file's `call`, magic.py), in a window of its own
-that clicks pass through; hidden, she sends it all the same.
+that clicks pass through; hidden, she sends it all the same. While the
+screen is dark or the PC locked (presence.py), she rests: nothing drawn,
+her art kept, her call held until you are back.
 
 The overlay runs while its session does, shown or hidden, and says on stdout
 what was chosen in its window (`hidden`). Its art is loaded only while it is
@@ -80,6 +82,7 @@ import effects as fx
 import magic
 import settings as cfg
 from layered import LayeredWindow
+from presence import Presence
 
 MOODS = ("idle", "thinking", "working", "happy", "error", "waiting", "worried", "sleepy", "beam")
 # Art the overlay plays on its own, not a mood the mod writes: "held" while
@@ -1246,6 +1249,7 @@ def run_window(parent, starter):
         "call": None,
     }
     calls = magic.Magic(root)
+    presence = Presence()
 
     def calm():
         return state["prefs"].calm
@@ -1379,9 +1383,11 @@ def run_window(parent, starter):
             if carry.over(t):
                 state["carry"], state["dirty"] = None, True
         celebrate(t)
-        if not (frames and state["shown"]):
+        if not (frames and state["shown"]) or presence.dark():
             # Hidden (or her art not built): nothing to draw until a show,
-            # which draws her at once.
+            # which draws her at once. The screen dark or locked: her art
+            # kept, nothing drawn until you are back, then at once.
+            state["dirty"] = True
             state["tick"] = root.after(STILL_TICK_MS, animate)
             return
         status_moving = fx.status_moving(state["status"], state["status_was"], t - state["status_since"], calm())
@@ -1397,9 +1403,11 @@ def run_window(parent, starter):
 
     def celebrate(t):
         """Starts a new version's banner once she can show it (shown, not
-        coming, going or carried), while the word of it is fresh; ends it."""
+        coming, going or carried, the screen on), while the word of it is
+        fresh; ends it."""
         due = state["celebrate"]
-        if due and state["shown"] and state["act"] is None and state["carry"] is None and sprites:
+        can_show = state["shown"] and state["act"] is None and state["carry"] is None and not presence.dark()
+        if due and can_show and sprites:
             state["celebrate"] = None
             if time.time() * 1000 - due[0] < CELEBRATE_FRESH_MS:
                 sprites["version"] = fx.version_banner(due[1], HEIGHT)
@@ -1607,7 +1615,8 @@ def run_window(parent, starter):
 
     def answer_call():
         """Sends a call as she fires her finish; while a fullscreen game or
-        a presentation holds notifications back (not for a test), it waits.
+        a presentation holds notifications back, or the screen is dark or
+        locked (not for a test), it waits.
         A new round of work, or her being in your hand, drops a waiting one:
         you are back."""
         call = state["call"]
@@ -1616,7 +1625,8 @@ def run_window(parent, starter):
         if state["ending"] or (not call["test"] and (state["mood"] in ("thinking", "working") or state["drag"])):
             state["call"] = None
             return
-        if time.monotonic() - call["seen"] < fx.CHARGE_S or (not call["test"] and magic.notifications_held()):
+        held = not call["test"] and (magic.notifications_held() or presence.dark())
+        if time.monotonic() - call["seen"] < fx.CHARGE_S or held:
             return
         state["call"] = None
         start = None

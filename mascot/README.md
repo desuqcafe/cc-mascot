@@ -37,7 +37,8 @@ A tag under her feet names the session's project (numbered, `app ·1`,
   - It goes at once, whatever window is in front and however long since
     you touched the mouse: neither says where you are looking (a video on
     one display, the terminal active on the other). It waits only while a
-    game runs in exclusive fullscreen or Windows is in presentation mode.
+    game runs in exclusive fullscreen, Windows is in presentation mode, or
+    your screen is off or locked; then it lands as you come back.
     A pointer an app hides (a playing video) still gets it.
   - It flies in a window of its own that clicks pass through and that never
     takes the focus.
@@ -70,6 +71,9 @@ A tag under her feet names the session's project (numbered, `app ·1`,
 - A hidden mascot keeps running, so showing it is instant, but holds no art
   in memory while hidden. A shown one builds a mood's frames the first time
   it takes the mood on, and keeps idle's and the two moods used last.
+- While your screen is off or your PC is locked, she rests and draws
+  nothing, and is back the moment you are. She never keeps your PC or your
+  screen awake.
 - Hover over it for a card about the session: context used (and how fast it
   grows, with an estimate of the turns left before auto-compact), the 5-hour
   and weekly usage limits, model, session length, prompts, what Claude is doing
