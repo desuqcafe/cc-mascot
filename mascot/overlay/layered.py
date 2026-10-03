@@ -25,7 +25,7 @@ SW_HIDE, SW_SHOWNOACTIVATE = 0, 4
 POPUP_CLASS = "MascotEffect"
 GW_HWNDPREV = 3
 HWND_TOPMOST = -1
-SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER = 0x1, 0x2, 0x10, 0x200
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOOWNERZORDER = 0x1, 0x2, 0x4, 0x10, 0x200
 ULW_ALPHA = 2
 AC_SRC_ALPHA = 1
 
@@ -120,10 +120,14 @@ class LayeredWindow:
     pixels (x, y); `close()` frees the bitmap."""
 
     def __init__(self, tk_window=None, hwnd=None):
+        self.inner = None  # Tk's own window inside the frame, sized with it
         if tk_window is not None:
             tk_window.update_idletasks()
             hwnd = user32.GetParent(tk_window.winfo_id()) or tk_window.winfo_id()
+            if hwnd != tk_window.winfo_id():
+                self.inner = tk_window.winfo_id()
         self.hwnd = hwnd
+        self.inner_size = None
         self._layer()
         self.dc = None
         self.bitmap = None
@@ -170,10 +174,24 @@ class LayeredWindow:
                 ctypes.byref(wt.POINT(0, 0)), 0, ctypes.byref(blend), ULW_ALPHA,
             ))
 
-        if update():
-            return True
-        self._layer()
-        return update()
+        shown = update()
+        if not shown:
+            self._layer()
+            shown = update()
+        if shown:
+            self._fit_inner()
+        return shown
+
+    def _fit_inner(self):
+        """Sizes Tk's window to the frame's. Tk is never told the size
+        (UpdateLayeredWindow sets it), so its window kept the one it had,
+        200 x 200 seen live: past it the pointer was outside her to Tk, whose
+        <Leave> hid the hover card and showed it again, every half second."""
+        if self.inner is None or self.inner_size == self.size:
+            return
+        w, h = self.size
+        user32.SetWindowPos(self.inner, None, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
+        self.inner_size = self.size
 
     def keep_on_top(self):
         """Puts the window back on top when a window that is not topmost
@@ -211,4 +229,4 @@ class LayeredWindow:
             gdi32.DeleteObject(self.bitmap)
             gdi32.DeleteDC(self.dc)
         self.dc = self.bitmap = self.old = None
-        self.size = self.image = None
+        self.size = self.image = self.inner_size = None

@@ -55,5 +55,34 @@ class KeepOnTop(unittest.TestCase):
         self.assertFalse(self.window.keep_on_top())  # on top already: nothing to do
 
 
+def size_of(hwnd):
+    r = layered.wt.RECT()
+    user32.GetWindowRect(hwnd, layered.ctypes.byref(r))
+    return r.right - r.left, r.bottom - r.top
+
+
+class TkSize(unittest.TestCase):
+    """Tk is never told her window's size (UpdateLayeredWindow sets it), so
+    its own window inside stayed as it was, 200 x 200 seen live: the pointer
+    past it was outside her to Tk, which sent <Leave> and hid the hover card,
+    and showed it again at once, every half second."""
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.root.overrideredirect(True)
+        self.window = layered.LayeredWindow(self.root)
+        self.root.update()
+
+    def tearDown(self):
+        self.root.destroy()
+
+    def test_tk_window_inside_follows_each_size(self):
+        for size in ((300, 420), (520, 640), (300, 420)):
+            self.assertTrue(self.window.show(layered.Image.new("RGBA", size, (0, 0, 0, 255)), 10, 10))
+            self.root.update()
+            self.assertEqual(size_of(self.window.hwnd), size)
+            self.assertEqual(size_of(self.root.winfo_id()), size)
+
+
 if __name__ == "__main__":
     unittest.main()
