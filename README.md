@@ -52,10 +52,10 @@ whenever you like.
 | --- | --- |
 | idle | Nothing running. |
 | thinking | After your message, between tool calls, and while the conversation compacts. |
-| working | A tool runs (reads, commands, edits), or subagents are at work. |
+| working | A tool runs (reads, commands, edits), or Claude waits on work it started: subagents, a build, a monitor. |
 | waiting | A permission prompt, a question for you, or a plan to approve. |
 | worried | A request has streamed nothing for 10 s: usually an API retry or a dropped connection. |
-| happy | Everything is finished: the reply, every subagent and every background agent. |
+| happy | Everything is finished: the reply and all the work it waited on. |
 | beam | Instead of happy, when the work took 2+ minutes or used subagents or background agents. |
 | error | A tool failed, or a reply ended on an error. Declining a prompt doesn't count. |
 | sleepy | Idle for 5 minutes. |

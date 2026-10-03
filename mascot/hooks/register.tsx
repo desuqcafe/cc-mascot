@@ -28,9 +28,29 @@ const STALL_MS = 10_000
 const STALL_TICK_MS = 1000
 // How long idle lasts before the mascot dozes off.
 const SLEEP_MS = 5 * 60_000
-// Background tasks that are agents at work (not shells or monitors, which
-// may run all session long).
+// Background tasks that are agents at work.
 const AGENT_TASKS = ['subagent', 'workflow', 'remote_agent']
+// Other background work Claude starts and will hear back from (a shell when
+// it exits, a monitor at each event, a one-time wakeup when it fires) holds
+// the round open too, when started during it: an orchestrator that ends its
+// turn to wait on a build is not done. Not a shell that serves or watches,
+// which runs on by design (`isEndless`), and none of it past WAIT_CAP_MS (a
+// server that list missed): the round then ends quietly, without happy or
+// magic, since nobody can tell the work is done.
+const WAIT_CAP_MS = 30 * 60_000
+// Shell commands that run until stopped: dev servers, watchers, log tails.
+const ENDLESS_COMMANDS = [
+  /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|serve|start|watch|preview)\b/,
+  /\b(next|nuxt|astro|remix|ng|webpack|hugo|jekyll|vue-cli-service|wrangler)\s+(dev|serve|server)\b/,
+  /\bvite\b(?!\s+(build|optimize))/,
+  /\b(nodemon|live-server|http-server|uvicorn|gunicorn|hypercorn|streamlit)\b/,
+  /\bhttp\.server\b|\bflask\s+run\b|\brunserver\b|\brails\s+s(erver)?\b|\bphp\s+-S\b/,
+  /--watch\b|\b(cargo|dotnet)\s+watch\b|\binotifywait\b.*\s-m\b/,
+  /\btail\s+(-\w+\s+)*-\w*[fF]\b|\bGet-Content\b.*\s-Wait\b/i,
+  /\bdocker(-compose|\s+compose)\s+up\b(?!.*\s(-d|--detach)\b)/,
+  /\bwhile\s+(true|:)\s*[;\n]/,
+]
+const isEndless = (command: string) => ENDLESS_COMMANDS.some(pattern => pattern.test(command))
 // Tools that wait on the person: their whole run is waiting.
 const ASKING_TOOLS = ['AskUserQuestion', 'ExitPlanMode']
 // The hover card: how soon after an event it refreshes, how often on its own
@@ -69,6 +89,7 @@ const work = atom({ plugin: 'mascot', key: 'work' } as const, {
   inTurn: false,
   agents: [],
   hasBackground: false,
+  waitUntil: 0,
   isSettled: true,
 } as MascotWork)
 
@@ -153,8 +174,14 @@ const asks: { n: number; tool: string }[] = []
 const denied = new Set<string>()
 // Dozes off once idle has lasted SLEEP_MS.
 let sleepTimer: Timer | undefined
-// The round of work under way: when it started, and whether agents helped.
-let round: { since?: number; hadAgents: boolean } = { hadAgents: false }
+// The background work (tasks and wakeups, by id) listed at the last Stop.
+let inFlight: string[] = []
+// The round of work under way: when it started, whether agents helped, the
+// background work already running then (none of it holds this round open),
+// and when each piece started since was first listed.
+type Round = { since?: number; hadAgents: boolean; before: Set<string>; seen: Map<string, number> }
+const newRound = (since?: number): Round => ({ since, hadAgents: false, before: new Set(inFlight), seen: new Map() })
+let round = newRound()
 
 // What the overlay's hover card shows, written beside the mood. All of it is
 // this one session's, so a mascot per session can show its own.
@@ -763,9 +790,9 @@ const show = async (
 }
 
 // Called whenever a round of work may have ended. Happy (the beam, for a
-// big round) only once the main turn is over and no subagent or background
-// agent work is left: an orchestrator that ends its turn to wait on its
-// agents is not done yet.
+// big round) only once the main turn is over and no subagent, background
+// agent or other work it waits on is left: an orchestrator that ends its
+// turn to wait on its agents or a build is not done yet.
 const settle = async ($: EngineInterface) => {
   try {
     const w = await read($, work)
@@ -775,14 +802,25 @@ const settle = async ($: EngineInterface) => {
       return
     }
     if (w.isSettled) return
-    await update($, work, cur => ({ ...cur, isSettled: true }))
     const now = await $.clock.now()
+    if (w.waitUntil > now) {
+      await show($, 'working', { force: true })
+      $.clock.after(w.waitUntil - now, () => void settle($))
+      return
+    }
+    await update($, work, cur => ({ ...cur, isSettled: true }))
+    if (w.waitUntil > 0) {
+      // What it waited on outlasted WAIT_CAP_MS: done or not, nobody knows.
+      round = newRound()
+      await show($, 'idle', { force: true })
+      return
+    }
     const { beamAfter, beamForAgents, magicAfter } = await loadSettings($)
     const lasted = (minutes: number | false) =>
       minutes !== false && round.since !== undefined && now - round.since >= minutes * 60_000
     const isBig = (beamForAgents && round.hadAgents) || lasted(beamAfter)
     if (lasted(magicAfter)) call = { at: now }
-    round = { hadAgents: false }
+    round = newRound()
     await show($, isBig ? 'beam' : 'happy', { holdMs: isBig ? BEAM_MS : HOLD_MS, after: 'idle' })
   } catch {
     // A mascot never gets in the way of the session.
@@ -927,8 +965,10 @@ const startOver = async ($: EngineInterface) => {
   live.subagents.clear()
   live.background = {}
   live.history = []
-  round = { hadAgents: false }
-  await update($, work, () => ({ inTurn: false, agents: [], hasBackground: false, isSettled: true })).catch(() => {})
+  round = newRound()
+  await update($, work, () => ({ inTurn: false, agents: [], hasBackground: false, waitUntil: 0, isSettled: true })).catch(
+    () => {},
+  )
   await show($, 'idle', { force: true })
   refreshSoon($)
 }
@@ -1035,10 +1075,12 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     const before = await read($, work).catch(() => undefined)
-    await update($, work, cur => ({ ...cur, inTurn: true, hasBackground: false, isSettled: false })).catch(() => {})
+    await update($, work, cur => ({ ...cur, inTurn: true, hasBackground: false, waitUntil: 0, isSettled: false })).catch(
+      () => {},
+    )
     live.turnSince = await quiet($.clock.now())
     // A prompt after everything settled starts a new round of work.
-    if (!before || before.isSettled) round = { since: live.turnSince, hadAgents: false }
+    if (!before || before.isSettled) round = newRound(live.turnSince)
     await show($, 'thinking', { force: true })
     refreshSoon($)
     return next(e)
@@ -1186,15 +1228,28 @@ export const register: Register = on => {
   })
 
   // The main turn's end, as the settings hooks see it: it lists the
-  // background work still in flight.
+  // background work still in flight, and the wakeups to come.
   on('classic.Stop', async ($, e, next) => {
-    // The list holds only work still in flight.
-    const hasBackground = (e.background_tasks ?? []).some(t => AGENT_TASKS.includes(t.type))
+    const tasks = e.background_tasks ?? []
+    const wakeups = e.session_crons ?? []
+    inFlight = [...tasks.map(t => t.id), ...wakeups.map(c => c.id)]
+    const hasBackground = tasks.some(t => AGENT_TASKS.includes(t.type))
     if (hasBackground) round.hadAgents = true
-    await update($, work, cur => ({ ...cur, hasBackground })).catch(() => {})
+    const awaited = [
+      ...tasks.filter(t => t.type === 'monitor' || (t.type === 'shell' && !isEndless(t.command ?? t.description))),
+      ...wakeups.filter(c => !c.recurring),
+    ].filter(t => !round.before.has(t.id))
+    const now = await quiet($.clock.now())
+    let waitUntil = 0
+    for (const t of awaited) {
+      if (!round.seen.has(t.id) && now !== undefined) round.seen.set(t.id, now)
+      const seen = round.seen.get(t.id)
+      if (seen !== undefined) waitUntil = Math.max(waitUntil, seen + WAIT_CAP_MS)
+    }
+    await update($, work, cur => ({ ...cur, hasBackground, waitUntil })).catch(() => {})
     // Subagents have a row of their own on the card.
     const counts: Record<string, number> = {}
-    for (const t of e.background_tasks ?? []) if (t.type !== 'subagent') counts[t.type] = (counts[t.type] ?? 0) + 1
+    for (const t of tasks) if (t.type !== 'subagent') counts[t.type] = (counts[t.type] ?? 0) + 1
     live.background = counts
     refreshSoon($)
     await settle($)

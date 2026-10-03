@@ -1,4 +1,7 @@
 {
+  "0.16.1": [
+    "She waits with Claude: a build, a test run or a monitor it is waiting on keeps her working, so happy and cursor magic come when it is really done."
+  ],
   "0.16.0": [
     "Cursor magic: turn it on here, and a long job ends with her sending magic to your pointer.",
     "Clicks pass through it, and it never takes the focus. Try it: /mascot magic."

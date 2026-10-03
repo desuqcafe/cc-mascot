@@ -8,7 +8,19 @@ export type MascotMood = { frame: MascotFrame; holdUntil: number; then: MascotFr
  * still at work, background agent work the last Stop reported, and whether
  * the end of this round of work has had its happy moment yet.
  */
-export type MascotWork = { inTurn: boolean; agents: string[]; hasBackground: boolean; isSettled: boolean }
+/**
+ * The main turn, the subagents running, whether background agents were
+ * listed at its end, and until when (clock ms; 0 for none) other background
+ * work Claude started this round holds the round open (a shell, a monitor,
+ * a wakeup).
+ */
+export type MascotWork = {
+  inTurn: boolean
+  agents: string[]
+  hasBackground: boolean
+  waitUntil: number
+  isSettled: boolean
+}
 
 /** Whether a mascot is shown, and when that was chosen (epoch ms): the newest choice wins. */
 export type MascotVisibility = { visible: boolean; at: number }

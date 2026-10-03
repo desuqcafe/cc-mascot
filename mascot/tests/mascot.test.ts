@@ -155,24 +155,163 @@ test('background agent work listed at Stop also holds happy back', async ($, on)
   await $.turn.complete(ended('t1'))
   expect(file.last()).toBe('working')
 
-  // A background shell (a dev server) is not agent work: done as usual,
-  // with the beam, since the round had a workflow.
+  // A dev server serves on by design: done as usual, with the beam, since
+  // the round had a workflow.
   await $.turn.start({ text: 'next', turnId: 't2' })
   await $.classic.Stop({
     stop_hook_active: false,
-    background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'npm run dev' }],
+    background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'Dev server', command: 'npm run dev' }],
   })
   await $.turn.complete(ended('t2'))
   expect(file.last()).toBe('beam')
   await clock.advance(3_600)
   expect(file.last()).toBe('idle')
 
-  // A round with only a shell behind it: happy.
+  // A round with only that server behind it: happy.
   await $.turn.start({ text: 'again', turnId: 't3' })
   await $.classic.Stop({
     stop_hook_active: false,
-    background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'npm run dev' }],
+    background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'Dev server', command: 'npm run dev' }],
   })
+  await $.turn.complete(ended('t3'))
+  expect(file.last()).toBe('happy')
+})
+
+// How long background work Claude waits on holds a round open, at most.
+const WAIT_CAP = 30 * 60_000
+const shell = (id: string, command: string) => ({ id, type: 'shell', status: 'running', description: command, command })
+const monitor = (id: string) => ({ id, type: 'monitor', status: 'running', description: 'CI checks' })
+
+test('an orchestrator waiting on shells and a monitor it started is not done until they are', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on, { magicAfter: 1 })
+  turnBottoms(on)
+
+  await $.turn.start({ text: 'build and check', turnId: 't1' })
+  await clock.advance(10_000)
+  await $.classic.Stop({
+    stop_hook_active: false,
+    background_tasks: [shell('s1', 'npm run build'), shell('s2', 'npm test'), monitor('m1')],
+  })
+  await $.turn.complete(ended('t1'))
+  expect(disk.last()!.frame).toBe('working')
+
+  // The monitor's event wakes Claude; the shells run on.
+  await clock.advance(30_000)
+  await $.turn.start({ text: '', turnId: 't2' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [shell('s1', 'npm run build'), shell('s2', 'npm test')] })
+  await $.turn.complete(ended('t2'))
+  expect(disk.last()!.frame).toBe('working')
+  await clock.advance(20 * 60_000)
+  expect(disk.last()!.frame).toBe('working')
+  expect(disk.files.map(f => f.frame)).not.toContain('happy')
+  expect(disk.last()!.call).toBeUndefined()
+
+  // The last shell exits: the round, timed from the first prompt, is done.
+  await $.turn.start({ text: '', turnId: 't3' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [] })
+  await $.turn.complete(ended('t3'))
+  expect(disk.last()!.frame).toBe('beam')
+  expect(disk.last()!.call).toEqual({ at: clock.now() })
+})
+
+test('servers, watchers and work from before the round do not hold it open', async ($, on) => {
+  const clock = mock.clock(on)
+  const file = moodFile(on)
+  turnBottoms(on)
+  const endless = [
+    'npm run dev',
+    'pnpm start',
+    'npx vite --port 5173',
+    'python -m http.server 8000',
+    'uvicorn app:app --reload',
+    'tail -f server.log',
+    'docker compose up',
+    'tsc --watch',
+    'Get-Content app.log -Wait',
+  ]
+
+  await $.turn.start({ text: 'serve it', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: endless.map((c, i) => shell(`e${i}`, c)) })
+  await $.turn.complete(ended('t1'))
+  expect(file.last()).toBe('happy')
+  await clock.advance(3_000)
+
+  // Lookalikes that end hold it, each on its own.
+  const ending = [
+    'npx vite build',
+    'docker compose up -d',
+    'until grep -q "Ready" dev.log; do sleep 0.5; done',
+    'npm run build && npm test',
+    'pytest -x',
+  ]
+  for (const [i, command] of ending.entries()) {
+    await $.turn.start({ text: 'wait on it', turnId: `w${i}` })
+    await $.classic.Stop({ stop_hook_active: false, background_tasks: [shell(`f${i}`, command)] })
+    await $.turn.complete(ended(`w${i}`))
+    expect([command, file.last()]).toEqual([command, 'working'])
+    await $.turn.start({ text: '', turnId: `x${i}` })
+    await $.classic.Stop({ stop_hook_active: false, background_tasks: [] })
+    await $.turn.complete(ended(`x${i}`))
+    await clock.advance(3_600)
+  }
+
+  // A build still running from a round that ended (interrupted here)
+  // belongs to that round.
+  await $.turn.start({ text: 'start a build', turnId: 't2' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [shell('b1', 'npm run build')] })
+  await $.turn.complete({ ...ended('t2'), isAborted: true, reason: 'aborted' })
+  expect(file.last()).toBe('idle')
+  await $.turn.start({ text: 'something else', turnId: 't3' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [shell('b1', 'npm run build')] })
+  await $.turn.complete(ended('t3'))
+  expect(file.last()).toBe('happy')
+})
+
+test('work it waits on that outlasts 30 minutes ends the round quietly', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on, { magicAfter: 1 })
+  turnBottoms(on)
+
+  await $.turn.start({ text: 'start the server', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [shell('s1', './run-my-server.sh')] })
+  await $.turn.complete(ended('t1'))
+  expect(disk.last()!.frame).toBe('working')
+  await clock.advance(WAIT_CAP - 1)
+  expect(disk.last()!.frame).toBe('working')
+  await clock.advance(1)
+  // Nobody knows it is done: no happy, no beam, no magic.
+  expect(disk.last()!.frame).toBe('idle')
+  expect(disk.files.map(f => f.frame)).not.toContain('happy')
+  expect(disk.files.map(f => f.frame)).not.toContain('beam')
+  expect(disk.last()!.call).toBeUndefined()
+
+  // The next prompt is a round of its own, the shell no part of it.
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [shell('s1', './run-my-server.sh')] })
+  await $.turn.complete(ended('t2'))
+  expect(disk.last()!.frame).toBe('happy')
+})
+
+test('a one-time wakeup holds the round open; a recurring one does not', async ($, on) => {
+  mock.clock(on)
+  const file = moodFile(on)
+  turnBottoms(on)
+  const wakeup = (id: string, recurring: boolean) => ({ id, schedule: '*/5 * * * *', recurring, prompt: 'check CI' })
+
+  await $.turn.start({ text: 'every 5 minutes', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [wakeup('c1', true)] })
+  await $.turn.complete(ended('t1'))
+  expect(file.last()).toBe('happy')
+
+  await $.turn.start({ text: 'check back later', turnId: 't2' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [wakeup('c1', true), wakeup('c2', false)] })
+  await $.turn.complete(ended('t2'))
+  expect(file.last()).toBe('working')
+
+  // It fires: Claude picks the work up and finishes.
+  await $.turn.start({ text: 'check CI', turnId: 't3' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [wakeup('c1', true)] })
   await $.turn.complete(ended('t3'))
   expect(file.last()).toBe('happy')
 })

@@ -126,10 +126,10 @@ core, calm 6.7%; working 19.5%, calm 16.6%).
 | --- | --- |
 | idle | Nothing running; also after an interrupted reply. |
 | thinking | Claude is working out its answer: after your message, between tool calls, and while the conversation is compacted. |
-| working | A tool runs (file reads, commands, edits), and while an orchestrator waits on its subagents. |
+| working | A tool runs (file reads, commands, edits), and while Claude waits on work it started: subagents, background agents, a background command or monitor, a wakeup it scheduled. Not a dev server or watcher, which runs on by design, and not past 30 minutes: then she goes back to idle without cheering, since nobody can tell the work is done. |
 | waiting | Claude needs you: a permission prompt, a question (AskUserQuestion, plan approval), or an MCP server asking something. After you approve a prompt it stays until that tool finishes (no event marks the approval). |
 | worried | A model request has streamed nothing for 10 s: usually an API error being retried, or a dropped connection. |
-| happy | 3 s when everything is done: the reply and every subagent or background agent. |
+| happy | 3 s when everything is done: the reply and all the work it waited on. |
 | beam | Instead of happy, when the work took 2 minutes or more, or used subagents or background agents: her big finish, 3.6 s. Both are settings (`/mascot beam after`, `/mascot beam agents`). |
 | error | 3 s when a tool fails, or a reply ends on an API error or refusal. Declining a permission prompt is not an error. |
 | sleepy | Idle for 5 minutes. |
