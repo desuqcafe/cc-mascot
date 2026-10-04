@@ -192,7 +192,8 @@ test('background agent work listed at Stop also holds happy back', async ($, on)
 // How long background work Claude waits on holds a round open, at most.
 const WAIT_CAP = 30 * 60_000
 const shell = (id: string, command: string) => ({ id, type: 'shell', status: 'running', description: command, command })
-const monitor = (id: string) => ({ id, type: 'monitor', status: 'running', description: 'CI checks' })
+// Claude's Monitor tool: its tasks are listed as shells.
+const monitor = (id: string) => shell(id, 'gh run watch 4711 --exit-status')
 
 test('an orchestrator waiting on shells and a monitor it started is not done until they are', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000 })
@@ -227,7 +228,7 @@ test('an orchestrator waiting on shells and a monitor it started is not done unt
   expect(disk.last()!.call).toEqual({ at: clock.now() })
 })
 
-test('servers, watchers and work from before the round do not hold it open', async ($, on) => {
+test('servers, watchers, subscriptions and work from before the round do not hold it open', async ($, on) => {
   const clock = mock.clock(on)
   const file = moodFile(on)
   turnBottoms(on)
@@ -244,8 +245,11 @@ test('servers, watchers and work from before the round do not hold it open', asy
     'while true; do date >> beat.log; sleep 5; done',
   ]
 
+  // A subscription with no end: the live watch on a published artifact.
+  const watch = { id: 'a1', type: 'monitor', status: 'running', description: 'Artifact live subscription' }
+
   await $.turn.start({ text: 'serve it', turnId: 't1' })
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: endless.map((c, i) => shell(`e${i}`, c)) })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [...endless.map((c, i) => shell(`e${i}`, c)), watch] })
   await $.turn.complete(ended('t1'))
   expect(file.last()).toBe('happy')
   await clock.advance(3_000)
@@ -955,12 +959,11 @@ const release = (
   on: On,
   version: string,
   run: (argv: readonly string[]) => { exitCode: number; stdout?: string; stderr?: string } = () => ({ exitCode: 0 }),
+  notes: Record<string, unknown> = { '0.15.0': ['Updates, in her colors.', 'A banner.'], '0.14.1': ['Older news.'] },
 ) => {
   const disk = sessionFiles(on, undefined, path => {
     if (/[\\/]\.claude-plugin[\\/]plugin\.json$/.test(path)) return JSON.stringify({ name: 'mascot', version })
-    if (/[\\/]whatsnew\.json$/.test(path)) {
-      return JSON.stringify({ '0.15.0': ['Updates, in her colors.', 'A banner.'], '0.14.1': ['Older news.'] })
-    }
+    if (/[\\/]whatsnew\.json$/.test(path)) return JSON.stringify(notes)
     return undefined
   })
   const toasts: string[] = []
@@ -992,15 +995,65 @@ test('a newer version than the last one run gets her banner and what is new, onc
   await start($)
   expect(disk.last()!.update).toMatchObject({ version: '0.15.0', from: '0.14.1', celebrate: 50_000 })
   expect(kept.get('lastVersion')).toBe('0.15.0')
-  expect(toasts).toEqual(['Mascot updated to v0.15.0: Updates, in her colors.'])
+  expect(toasts).toEqual(['Mascot updated to v0.15.0: Updates, in her colors. (+1 more: /mascot news)'])
   expect(disk.last()!.frame).toBe('happy')
   await clock.advance(3_600)
   expect(disk.last()!.frame).toBe('idle')
 
-  // A reload of the same version: no banner again.
+  // A reload of the same version: no banner again, and what is new still
+  // counts from the version before.
   await start($)
   expect(disk.last()!.update!.celebrate).toBeUndefined()
+  expect(disk.last()!.update!.from).toBe('0.14.1')
   expect(toasts.length).toBe(1)
+})
+
+test('versions skipped over are not lost: the toast leads with news over a fix, /mascot news has the rest', async ($, on) => {
+  mock.clock(on, { now: 50_000 })
+  const { toasts } = release(on, '0.17.0', undefined, {
+    '0.17.0': [{ text: 'A stuck mood, unstuck.', kind: 'fix' }],
+    '0.16.3': ['Smooth sparkles: /mascot smooth.'],
+    '0.16.2': ['Lighter.', { text: 'A glitch, fixed.', kind: 'fix' }],
+    '0.16.1': ['Seen already.'],
+    '0.16.0': [42, { kind: 'fix' }, ''], // not lines: skipped
+  })
+  const kept = store(on)
+  overlayProcess(on)
+  kept.set('lastVersion', '0.16.1')
+
+  await start($)
+  expect(toasts).toEqual(['Mascot updated to v0.17.0: Smooth sparkles: /mascot smooth. (+3 more: /mascot news)'])
+  expect(kept.get('upgrade')).toEqual({ from: '0.16.1', to: '0.17.0' })
+  expect((await mascot($, 'news')).text).toBe(
+    [
+      'New since v0.16.1:',
+      'v0.17.0',
+      '  - Fix: A stuck mood, unstuck.',
+      'v0.16.3',
+      '  - Smooth sparkles: /mascot smooth.',
+      'v0.16.2',
+      '  - Lighter.',
+      '  - Fix: A glitch, fixed.',
+      '/mascot news all lists every version.',
+    ].join('\n'),
+  )
+  const every = (await mascot($, 'news all')).text
+  expect(every).toStartWith('Every version, newest first:\nv0.17.0')
+  expect(every).toContain('v0.16.1\n  - Seen already.')
+  expect(every).not.toContain('v0.16.0')
+  expect((await mascot($, 'news later')).text).toStartWith('Usage:')
+})
+
+test('/mascot news without an update to count from says what is new in this version', async ($, on) => {
+  mock.clock(on)
+  release(on, '0.15.0')
+  store(on)
+  overlayProcess(on)
+
+  await start($)
+  expect((await mascot($, 'news')).text).toBe(
+    'New in v0.15.0:\nv0.15.0\n  - Updates, in her colors.\n  - A banner.\n/mascot news all lists every version.',
+  )
 })
 
 test('the first version ever run is only noted, and an older one leaves it', async ($, on) => {

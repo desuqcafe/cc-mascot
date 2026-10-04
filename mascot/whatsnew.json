@@ -1,9 +1,19 @@
 {
+  "0.17.0": [
+    "What's new, all of it: after an update she tells you what you missed since your version, not only the newest line. /mascot news lists it, and so does \"What's new in every version\" in /mascot settings.",
+    {
+      "text": "She no longer stays stuck working after Claude publishes a page: its watch for comments is not work Claude is waiting on.",
+      "kind": "fix"
+    }
+  ],
   "0.16.5": [
     "She rests while your screen is off or your PC is locked, and cursor magic waits until you are back."
   ],
   "0.16.4": [
-    "She keeps working while Claude watches for something to finish, rather than going idle too early."
+    {
+      "text": "She keeps working while Claude watches for something to finish, rather than going idle too early.",
+      "kind": "fix"
+    }
   ],
   "0.16.3": [
     "Smooth sparkles: her aura's sparkles can move as smoothly as her symbols. Off by default: turn it on in the Calm mode card or with /mascot smooth. Her sparkles are lighter to draw, too."
@@ -19,7 +29,10 @@
     "Clicks pass through it, and it never takes the focus. Try it: /mascot magic."
   ],
   "0.15.1": [
-    "She stays on top: when Windows lets a window slip above her, she is back in front within a second."
+    {
+      "text": "She stays on top: when Windows lets a window slip above her, she is back in front within a second.",
+      "kind": "fix"
+    }
   ],
   "0.15.0": [
     "Updates: an Updates card here, /mascot update, and a banner for each new version.",

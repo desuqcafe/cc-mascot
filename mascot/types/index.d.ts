@@ -62,8 +62,10 @@ export type MascotCall = { at: number; test?: true }
  * copy updates ('marketplace': `claude plugin update`, 'clone': `git pull`,
  * 'manual': by hand); `state` an update run from this session ('updating',
  * 'updated', or 'failed' with `message`); `celebrate` (epoch ms) when a
- * newer version than the last one run first loaded, `from` that one: the
- * overlay plays its banner once, while that is fresh.
+ * newer version than the last one run first loaded: the overlay plays its
+ * banner once, while that is fresh; `from` the version before the last
+ * update (`$.store` `upgrade`, in every session while `version` runs): the
+ * settings window's news counts from it.
  */
 export type MascotUpdate = {
   version: string

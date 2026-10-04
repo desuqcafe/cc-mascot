@@ -211,7 +211,9 @@ Updating a clone is a `git pull` (`/mascot update` does it for you).
 
 A new version greets you: the first time it runs, she holds up a "NEW!"
 banner with its version (Yunseul's has bat wings) and Claude Code shows
-what is new in it.
+what is new. Skipped a few versions? `/mascot news` lists everything since
+the one you had, and **What's new in every version** in the settings
+window shows every version's news.
 
 To hear about one before you have it, turn on **Look for new versions** in
 the settings window (or `/mascot updates on`). It is off by default; on, the
@@ -241,6 +243,7 @@ clone); type `/reload-plugins` afterwards to meet her new version.
 | `/mascot magic after [MINUTES\|never]` | How long a job runs before its end sends magic to your pointer (0 for every job; off by default). |
 | `/mascot updates [on\|off]` | Look for a new version once a day (off by default). |
 | `/mascot update` | Update her to the newest version. |
+| `/mascot news [all]` | What is new since the version you had before (`all`: every version). |
 | `/mascot reset` | Every setting back to its default. |
 
 ## Settings

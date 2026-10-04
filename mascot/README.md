@@ -54,8 +54,10 @@ A tag under her feet names the session's project (numbered, `app ·1`,
 - A new version greets you: the first time one newer than the last she
   ran loads (however it came), she holds up a "NEW! v0.15.0" banner in her
   main color while stars and notes fountain up around her, and a toast
-  says what is new (`whatsnew.json`). Once per version, for whichever
-  session loads it first.
+  says what is new (`whatsnew.json`): one line, news before fixes, and
+  how many more since the version you had. Once per version, for
+  whichever session loads it first. `/mascot news` lists all of it (`all`:
+  every version), as does the settings window's What's new page.
 - Several mascots stand side by side, never on top of each other: the first
   in the main display's bottom-right corner, each next one to the left of the
   one before, wherever you dragged that one, on to your other displays when a
@@ -102,6 +104,7 @@ in `~/.claude/mascot/settings.json`, which holds only what you changed.
 | `/mascot beam agents [on\|off]` | Whether a round that used subagents or background agents ends in the beam too (on). |
 | `/mascot magic after [MINUTES\|never\|default]` | How long a round of work lasts before its end sends magic to your pointer (0 for every round; up to 120), or never (the default). |
 | `/mascot updates [on\|off]` | Look for a newer version once a day (off): one read of this plugin's `plugin.json` on GitHub, nothing sent. When there is one, her hover card says so and the settings window offers it. With no value, it also says her version. |
+| `/mascot news [all]` | What is new since the version you had before her last update, by version (`all`: every version). |
 | `/mascot reset` | Every setting back to its default. |
 
 With no value, each command says what the setting is now. The file can be
@@ -113,9 +116,10 @@ The settings window has the same settings in the character's own colors
 tile for each, in her colors, and "Remember for this project"), her size
 with a preview of her at it, calm mode and smooth sparkles, the aura's
 three thresholds on one track, the beam, cursor magic (with a "Send one
-now" to try it), and updates (her version, what is new in it, the daily
-check, and an Update button when a newer version is out, following the
-update as it runs). A change is saved at once, and a change made elsewhere
+now" to try it), and updates (her version, what is new since the one
+before, a page of every version's news, the daily check, and an Update
+button when a newer version is out, following the update as it runs).
+A change is saved at once, and a change made elsewhere
 (a command, the file) shows in it within a second. Running `/mascot
 settings` again brings it forward; run from another session, the window
 reopens for that one (its character picks are that session's), where it

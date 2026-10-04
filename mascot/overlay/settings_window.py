@@ -15,8 +15,9 @@ reads (remembered for the project, or for this session alone), and the
 window takes on her colors at once; it follows the session file's
 `character` too (/mascot character), every `POLL_MS`.
 
-Its Updates card shows her version and what is new in it (whatsnew.json),
-turns the daily check for a newer one on and off (`checkUpdates`; turning
+Its Updates card shows her version and what is new since the version
+before (whatsnew.json; `from` in the session file's `update`), with a link
+to a page of every version's news (`page` "news", the `Changelog`), turns the daily check for a newer one on and off (`checkUpdates`; turning
 it on says `check`, so the mod looks at once), and, when the mod has found
 one (the session file's `update`), offers it: a press says `update`, and
 the mod's progress shows as it writes it. Its cursor magic card's button
@@ -66,6 +67,7 @@ DISABLED = 0.4  # a widget that does nothing now is drawn this faint
 # The ranges the sliders show; the settings take more (by hand or /mascot),
 # shown at the slider's end.
 UPDATES = 100  # the updates card's height
+SCROLL_STEP = 54  # px a wheel notch scrolls the news
 MAGIC = 96  # the cursor magic card's height
 AURA_SHOWN = (0, 1_000_000, 10_000)  # low, high, step (and the least gap)
 BEAM_SHOWN = (1, 30, 1)
@@ -259,6 +261,43 @@ def wrap(words, kind, px, width, most):
 
 def text_width(words, kind, px):
     return font(kind, px, words).getlength(words)
+
+
+# ---------------------------------------------------------------- what's new
+
+# whatsnew.json: { "0.17.0": ["a line", {"text": "a line", "kind": "fix"}] }.
+# A line is news unless marked a fix. The mod reads it by the same rules
+# (`notesBetween` in hooks/register.tsx): keep them in step.
+News = namedtuple("News", "version text is_fix")
+VERSION = re.compile(r"^\d+(\.\d+){1,3}$")
+
+
+def version_key(v):
+    parts = [int(p) for p in v.split(".")]
+    return parts + [0] * (4 - len(parts))
+
+
+def notes_between(data, since, to):
+    """The lines of the versions after `since` (None: every one) up to `to`,
+    newest first."""
+    if not isinstance(data, dict):
+        return []
+    versions = [v for v in data if isinstance(v, str) and VERSION.match(v) and version_key(v) <= version_key(to)
+                and (since is None or version_key(v) > version_key(since))]
+    out = []
+    for v in sorted(versions, key=version_key, reverse=True):
+        lines = data[v] if isinstance(data[v], list) else []
+        for line in lines:
+            if isinstance(line, str) and line.strip():
+                out.append(News(v, line, False))
+            elif isinstance(line, dict) and isinstance(line.get("text"), str) and line["text"].strip():
+                out.append(News(v, line["text"], line.get("kind") == "fix"))
+    return out
+
+
+def headline(news):
+    """The line to lead with: the newest that is not a fix, else the newest."""
+    return next((n for n in news if not n.is_fix), news[0] if news else None)
 
 
 def knob(d, ring, theme, grow=0.0):
@@ -644,6 +683,100 @@ class Link(Widget):
             self.action()
 
 
+class Changelog(Widget):
+    """Every version's news, newest first, scrolled by the wheel or a drag;
+    the versions new since `since` are marked NEW."""
+
+    def __init__(self, app, box, news, since):
+        super().__init__(app, box)
+        self.news, self.since = news, since
+        self.offset = 0
+        self.grip = None
+        self.page = None
+
+    def _page(self):
+        """The whole list drawn once, as tall as it needs."""
+        if self.page is not None:
+            return self.page
+        t, u = self.app.theme, self.app.u
+        w = self.box[2]
+        pad, gap = round(14 * u), round(4 * u)
+        body, lead = 12.5 * u, round(19 * u)
+        parts, y, version = [], 0, None
+        for n in self.news:
+            if n.version != version:
+                version = n.version
+                y += round(10 * u) if parts else 0
+                parts.append(("version", y, n.version))
+                y += round(28 * u)
+            lines = wrap(n.text, "regular", body, w - 2 * pad - 18 * u, 99)
+            parts.append(("line", y, (n, lines)))
+            y += lead * len(lines) + gap
+        img = Image.new("RGBA", (w, max(1, y + pad)), (0, 0, 0, 0))
+        for kind, y, what in parts:
+            if kind == "version":
+                is_new = self.since is not None and version_key(what) > version_key(self.since)
+                text(img, (pad, y + 12 * u), f"v{what}", "bold", 15 * u, t.primaryDeep, "lm")
+                if is_new:
+                    x = pad + text_width(f"v{what}", "bold", 15 * u) + 10 * u
+                    tw = round(text_width("NEW", "bold", 10 * u) + 14 * u)
+                    put(img, filled(pill_mask(tw, round(18 * u)), t.accent), x, y + 3 * u)
+                    text(img, (x + tw / 2, y + 12 * u), "NEW", "bold", 10 * u, t.card, "mm")
+            else:
+                n, lines = what
+                dot = round(6 * u)
+                put(img, filled(disc_mask(dot), t.muted if n.is_fix else t.primary), pad + 2 * u, y + lead / 2 - dot / 2)
+                for i, line in enumerate(lines):
+                    text(img, (pad + 18 * u, y + lead * (i + 0.5)), line, "regular", body,
+                         t.muted if n.is_fix else t.ink, "lm")
+        self.page = img
+        return img
+
+    def most(self):
+        return max(0, self._page().height - self.box[3])
+
+    def scroll_to(self, offset):
+        offset = max(0, min(self.most(), round(offset)))
+        if offset != self.offset:
+            self.offset = offset
+            self.app.render(self)
+
+    def draw(self, img):
+        page = self._page()
+        view = page.crop((0, self.offset, img.width, self.offset + img.height))
+        if self.most():
+            # Soft edges where there is more above or below.
+            fade = round(22 * self.app.u)
+            ramp = Image.linear_gradient("L").resize((1, fade))  # 0 at the top, 255 at the bottom
+            mask = Image.new("L", view.size, 255)
+            if self.offset > 0:
+                mask.paste(ramp.resize((view.width, fade)), (0, 0))
+            if self.offset < self.most():
+                mask.paste(ramp.transpose(Image.FLIP_TOP_BOTTOM).resize((view.width, fade)), (0, view.height - fade))
+            view.putalpha(ImageChops.multiply(view.getchannel("A"), mask))
+        img.alpha_composite(view)
+        if self.most():
+            t, u = self.app.theme, self.app.u
+            h = img.height
+            bar = max(round(30 * u), round(h * h / page.height))
+            top = round((h - bar) * self.offset / self.most())
+            w = round(4 * u)
+            put(img, filled(pill_mask(w, bar, w / 2), t.track), img.width - w - 2 * u, top)
+
+    def press(self, x, y):
+        self.grip = (y, self.offset)
+
+    def drag(self, x, y):
+        if self.grip:
+            self.scroll_to(self.grip[1] - (y - self.grip[0]))
+
+    def release(self, x, y):
+        self.grip = None
+
+    def wheel(self, steps):
+        self.scroll_to(self.offset - steps * SCROLL_STEP * self.app.u)
+
+
 class Characters(Widget):
     """A tile per character (`app.cast`: [(name, Theme, portrait)]), each in
     its own colors, the one shown filled; a click picks one (`app.pick`)."""
@@ -776,6 +909,7 @@ class App:
         self.notes = read_json(os.path.join(plugin_root, "whatsnew.json")) or {}
         self.asked = False
         self.read_release()
+        self.page = "settings"  # or "news": every version's news
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -793,7 +927,7 @@ class App:
         self.canvas.bind("<B1-Motion>", self.on_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
         self.canvas.bind("<MouseWheel>", self.on_wheel)
-        self.root.bind("<Escape>", lambda _e: self.close())
+        self.root.bind("<Escape>", lambda _e: self.on_escape())
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
         if not show:
@@ -872,7 +1006,8 @@ class App:
         update = (data if data is not None else self.session_data()).get("update")
         if not isinstance(update, dict) or not isinstance(update.get("version"), str):
             return False
-        release = {k: update[k] for k in ("version", "latest", "state", "message") if isinstance(update.get(k), str)}
+        release = {k: update[k] for k in ("version", "latest", "state", "message", "from")
+                   if isinstance(update.get(k), str)}
         if release.get("state") in ("updating", "updated", "failed"):
             self.asked = False  # the mod has answered
         changed = release != self.release
@@ -900,11 +1035,35 @@ class App:
             return "The update failed", r.get("message", "")
         if r.get("latest"):
             return f"v{r['latest']} is out!", f"She is v{version} now."
-        notes = self.notes.get(version)
-        if isinstance(notes, list) and notes and isinstance(notes[0], str):
-            return f"New in v{version}", notes[0]
+        lead = headline(self.news())
+        if lead:
+            return (f"New since v{r['from']}" if r.get("from") else f"New in v{version}"), lead.text
         return (f"v{version}" if version else "Her version"), (
             "She is up to date." if self.prefs.checkUpdates and r.get("version") else "")
+
+    def news(self):
+        """What is new since the version before (else in this one)."""
+        version, since = self.release.get("version", ""), self.release.get("from")
+        if not VERSION.match(version):
+            return []
+        if since and VERSION.match(since):
+            return notes_between(self.notes, since, version)
+        return [n for n in notes_between(self.notes, None, version) if n.version == version]
+
+    def show_page(self, page):
+        """The settings, or every version's news, in the same window."""
+        if page != self.page:
+            self.flush()
+            self.page = page
+            self.grabbed = None
+            self.build()
+
+    def on_escape(self):
+        """Esc: back from the news, else closes."""
+        if self.page == "news":
+            self.show_page("settings")
+        else:
+            self.close()
 
     def ask_update(self):
         say("update")
@@ -996,6 +1155,8 @@ class App:
         draw_header(self.bg, t, u, self.portrait)
         cast_top = 134
         top = cast_top + CAST + 14
+        if self.page == "news":
+            return self.layout_news(W, M, H, cast_top)
 
         def card(x, y, w, h, jp, en, lines, value=None):
             """A card, its chip and title, and its description; (x, y) of its inside."""
@@ -1089,8 +1250,10 @@ class App:
         self.add(Label(self, box(panel, y + 12, pw - 176, 30), lambda: self.release_lines()[0],
                        "bold", 15 * u, lambda: t.accentDeep if self.release_offer() else t.primaryDeep), "release",
                  "checkUpdates")
-        self.add(Note(self, box(panel, y + 46, pw, 40), lambda: self.release_lines()[1],
+        self.add(Note(self, box(panel, y + 42, pw, 22), lambda: self.release_lines()[1],
                       12 * u, lambda: t.muted, 18 * u), "release", "checkUpdates")
+        self.add(Link(self, box(panel + pw - 200, y + 66, 200, 24), "What's new in every version",
+                      lambda: self.show_page("news")))
         self.add(Offer(self, box(panel + pw - 168, y + 12, 168, 32), self.release_offer, self.ask_update), "release")
 
         # Footer
@@ -1111,6 +1274,23 @@ class App:
         self.add(Toggle(self, box(x + 16, y + 64, W - 2 * M - 48 - tiles, 26), lambda: self.remember,
                         self.set_remember, where), "remember")
         self.add(Characters(self, box(x + W - 2 * M - 16 - tiles, y + 14, tiles, CAST - 28)), "character")
+
+    def layout_news(self, W, M, H, top):
+        """The news page: every version's news on one card, and the way back."""
+        t, u = self.theme, self.u
+        fy = H - 14 - 32
+        h = fy - 14 - top
+        draw_card(self.bg, t, u, M, top, W - 2 * M, h)
+        chip_w = draw_chip(self.bg, t, u, M + 16, top + 15, "おしらせ")
+        text(self.bg, ((M + 16) * u + chip_w + 8 * u, (top + 26) * u), "What's new", "bold", 15.5 * u, t.ink, "lm")
+        since = self.release.get("from")
+        sub = f"Newest first. Marked NEW: since v{since}, the version before." if since else "Newest first."
+        text(self.bg, ((M + 16) * u, (top + 48) * u), sub, "regular", 12 * u, t.muted, "la")
+        news = notes_between(self.notes, None, self.release.get("version") or "999")
+        self.add(Changelog(self, (M * u, (top + 70) * u, (W - 2 * M - 8) * u, (h - 70 - 12) * u), news, since))
+        self.add(Label(self, ((M + 4) * u, fy * u, 400 * u, 32 * u), lambda: "Scroll for older versions. Esc goes back.",
+                       "regular", 12 * u, lambda: t.muted))
+        self.add(Button(self, ((W - M - 104) * u, fy * u, 104 * u, 32 * u), "Back", lambda: self.show_page("settings")))
 
     def add(self, widget, *keys):
         """A widget whose look depends on the settings `keys` (and "problem",

@@ -323,6 +323,50 @@ class Updates(unittest.TestCase):
         self.assertEqual(self.app.release_lines(), ("The update failed", "fatal: no"))
         self.assertEqual(self.app.release_offer(), "Try again")
 
+    def test_after_an_update_it_leads_with_news_since_the_version_before(self):
+        self.app.notes = {"0.17.0": [{"text": "A fix.", "kind": "fix"}], "0.16.3": ["Smooth sparkles."],
+                          "0.16.1": ["Seen already."]}
+        self.session({"version": "0.17.0", "route": "clone", "from": "0.16.1"})
+        self.assertEqual(self.app.release_lines(), ("New since v0.16.1", "Smooth sparkles."))
+
+    def test_whats_new_reads_lines_and_fixes_by_the_mods_rules(self):
+        data = {"0.17.0": ["News.", {"text": "A fix.", "kind": "fix"}, 3, {"kind": "fix"}, " "],
+                "0.16.10": ["Ten."], "0.16.9": ["Nine."], "0.18.0": ["Not out."], "beta": ["No."], "0.16.8": "not a list"}
+        self.assertEqual(sw.notes_between(data, "0.16.9", "0.17.0"), [
+            sw.News("0.17.0", "News.", False), sw.News("0.17.0", "A fix.", True), sw.News("0.16.10", "Ten.", False)])
+        self.assertEqual([n.version for n in sw.notes_between(data, None, "0.17.0")], ["0.17.0", "0.17.0", "0.16.10", "0.16.9"])
+        self.assertEqual(sw.headline([sw.News("1", "fix", True), sw.News("1", "news", False)]).text, "news")
+        self.assertEqual(sw.headline([sw.News("1", "fix", True)]).text, "fix")
+        self.assertIsNone(sw.headline([]))
+
+    def test_every_versions_news_is_a_page_of_its_own(self):
+        self.session({"version": "0.17.0", "route": "clone", "from": "0.16.1"})
+        size = self.app.image().size
+        click(self.app, next(w for w in self.app.widgets if isinstance(w, sw.Link) and w.words.startswith("What's new")))
+        self.assertEqual(self.app.page, "news")
+        self.assertEqual(self.app.image().size, size)  # the window keeps its size
+        log = next(w for w in self.app.widgets if isinstance(w, sw.Changelog))
+        self.assertEqual(log.since, "0.16.1")
+        self.assertEqual(log.news[0].version, "0.17.0")  # newest first, from her own whatsnew.json
+        self.assertGreater(log.most(), 0)  # more than fits: it scrolls
+        log.wheel(-1)
+        self.assertEqual(log.offset, round(sw.SCROLL_STEP * self.app.u))
+        log.wheel(-1000)
+        self.assertEqual(log.offset, log.most())
+        x, y = center(log)
+        log.press(x, y)
+        log.drag(x, y + 40)
+        log.release(x, y + 40)
+        self.assertEqual(log.offset, log.most() - 40)
+        log.wheel(1000)
+        self.assertEqual(log.offset, 0)
+
+        self.app.on_escape()  # back, not closed
+        self.assertEqual(self.app.page, "settings")
+        self.app.show_page("news")
+        click(self.app, next(w for w in self.app.widgets if isinstance(w, sw.Button) and w.words == "Back"))
+        self.assertEqual(self.app.page, "settings")
+
     def test_long_words_wrap_and_are_cut_to_fit(self):
         lines = sw.wrap("one two three four five six seven eight nine ten", "regular", 12, 80, 2)
         self.assertEqual(len(lines), 2)

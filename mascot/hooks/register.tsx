@@ -31,12 +31,16 @@ const SLEEP_MS = 5 * 60_000
 // Background tasks that are agents at work.
 const AGENT_TASKS = ['subagent', 'workflow', 'remote_agent']
 // Other background work Claude starts and will hear back from (a shell when
-// it exits, a monitor at each event, a one-time wakeup when it fires) holds
-// the round open too, when started during it: an orchestrator that ends its
-// turn to wait on a build is not done. Not a shell that serves or watches,
-// which runs on by design (`isEndless`), and none of it past WAIT_CAP_MS (a
-// server that list missed): the round then ends quietly, without happy or
-// magic, since nobody can tell the work is done.
+// it exits, Claude's Monitor tool at each event, a one-time wakeup when it
+// fires) holds the round open too, when started during it: an orchestrator
+// that ends its turn to wait on a build is not done. Not a shell that serves
+// or watches, which runs on by design (`isEndless`), and none of it past
+// WAIT_CAP_MS (a server that list missed): the round then ends quietly,
+// without happy or magic, since nobody can tell the work is done.
+// The Monitor tool's tasks are listed as shells (checked headless, 2.1.289).
+// A task of type `monitor` is a subscription with no end, such as the live
+// watch Claude Code keeps on an artifact it published (seen 0.16.5: she sat
+// in working for the cap after a publish), so it never holds a round.
 const WAIT_CAP_MS = 30 * 60_000
 // Shell commands that run until stopped: dev servers, watchers, log tails.
 const ENDLESS_COMMANDS = [
@@ -80,6 +84,9 @@ const LATEST_URL = 'https://raw.githubusercontent.com/desuqcafe/cc-mascot/main/m
 const CHECK_EVERY_MS = 24 * 60 * 60_000
 const VERSION_KEY = 'lastVersion'
 const LATEST_KEY = 'latest'
+// `$.store`: the last update, { from, to }: what is new counts from `from`
+// while `to` runs, in every session (not only the one that saw it first).
+const UPGRADE_KEY = 'upgrade'
 const UPDATE_TIMEOUT_MS = 5 * 60_000
 // How long she stays happy under her banner.
 const CELEBRATE_MS = 3600
@@ -503,18 +510,51 @@ const routeOf = async ($: EngineInterface): Promise<Route> => {
 }
 
 // What's new in each version, shipped with the mod (whatsnew.json:
-// { "0.15.0": ["...", ...] }): the lines of the versions after `from`, up
-// to `to`, newest first.
-const notesBetween = async ($: EngineInterface, from: string, to: string) => {
+// { "0.17.0": ["a line", { "text": "a line", "kind": "fix" }] }): a line is
+// news unless marked a fix. The settings window reads it by the same rules
+// (`notes_between` in overlay/settings_window.py): keep them in step.
+type News = { version: string; text: string; isFix: boolean }
+
+const newsOf = (version: string, line: unknown): News[] => {
+  if (typeof line === 'string') return line.trim() ? [{ version, text: line, isFix: false }] : []
+  if (!line || typeof line !== 'object') return []
+  const { text, kind } = line as { text?: unknown; kind?: unknown }
+  return typeof text === 'string' && text.trim() ? [{ version, text, isFix: kind === 'fix' }] : []
+}
+
+// The lines of the versions after `from` (every one without), up to `to`,
+// newest first.
+const notesBetween = async ($: EngineInterface, from: string | undefined, to: string): Promise<News[]> => {
   try {
     const all = JSON.parse(await $.fs.read(`${$.plugin.root}/whatsnew.json`)) as Record<string, unknown>
     return Object.keys(all)
-      .filter(v => isVersion(v) && isNewer(v, from) && !isNewer(v, to))
+      .filter(v => isVersion(v) && (from === undefined || isNewer(v, from)) && !isNewer(v, to))
       .sort((a, b) => (isNewer(a, b) ? -1 : 1))
-      .flatMap(v => (Array.isArray(all[v]) ? (all[v] as unknown[]).filter(l => typeof l === 'string') : [])) as string[]
+      .flatMap(v => (Array.isArray(all[v]) ? (all[v] as unknown[]) : []).flatMap(line => newsOf(v, line)))
   } catch {
     return []
   }
+}
+
+// The line to lead with: the newest that is not a fix, else the newest.
+const headline = (news: News[]) => news.find(n => !n.isFix) ?? news[0]
+
+// /mascot news: what is new since the version before (else in this one), or
+// in `every` version, by version, newest first.
+const newsText = async ($: EngineInterface, every: boolean) => {
+  if (!release) return 'Mascot: its version is unknown.'
+  const { version, from } = release
+  const all = await notesBetween($, every ? undefined : from, version)
+  const news = every || from ? all : all.filter(n => n.version === version)
+  if (news.length === 0) return `Nothing written down for v${version}. /mascot news all lists every version.`
+  const title = every ? 'Every version, newest first' : from ? `New since v${from}` : `New in v${version}`
+  const lines: string[] = [`${title}:`]
+  for (const [i, n] of news.entries()) {
+    if (n.version !== news[i - 1]?.version) lines.push(`v${n.version}`)
+    lines.push(`  - ${n.isFix ? 'Fix: ' : ''}${n.text}`)
+  }
+  if (!every) lines.push('/mascot news all lists every version.')
+  return lines.join('\n')
 }
 
 const setRelease = async ($: EngineInterface, changes: Partial<MascotUpdate>) => {
@@ -535,12 +575,20 @@ const startRelease = async ($: EngineInterface) => {
     const seen = (await quiet($.store.get(LATEST_KEY))) as { version?: unknown } | undefined
     const latest = isVersion(seen?.version) && isNewer(seen.version, version) ? seen.version : undefined
     release = { version, route: updater.route, latest }
+    const upgrade = (await quiet($.store.get(UPGRADE_KEY))) as { from?: unknown; to?: unknown } | undefined
+    if (upgrade?.to === version && isVersion(upgrade.from)) release.from = upgrade.from
     if (!isVersion(last) || isNewer(version, last)) await $.store.set(VERSION_KEY, version)
     if (isVersion(last) && isNewer(version, last)) {
       release.celebrate = await $.clock.now()
       release.from = last
-      const [note] = await notesBetween($, last, version)
-      $.ui.toast(`Mascot updated to v${version}${note ? `: ${note}` : ''}`)
+      await $.store.set(UPGRADE_KEY, { from: last, to: version })
+      // One line, the one worth telling, and how to read the rest.
+      const news = await notesBetween($, last, version)
+      const lead = headline(news)
+      const more = news.length - (lead ? 1 : 0)
+      $.ui.toast(
+        `Mascot updated to v${version}${lead ? `: ${lead.text}` : ''}${more > 0 ? ` (+${more} more: /mascot news)` : ''}`,
+      )
       const { frame } = await read($, mood)
       if (frame === 'idle' || frame === 'sleepy') await show($, 'happy', { holdMs: CELEBRATE_MS, after: 'idle' })
     }
@@ -999,9 +1047,9 @@ export const register: Register = on => {
     await $.command.register({
       name: 'mascot',
       description:
-        "Show or hide this session's mascot (or every session's), pick its character, fire her beam, send magic to your pointer, update her, or change her settings",
+        "Show or hide this session's mascot (or every session's), pick its character, fire her beam, send magic to your pointer, update her, see what is new, or change her settings",
       argumentHint:
-        '[show|hide] [all] | character [name] | beam | magic | update | settings | size | calm | smooth | aura | beam after | magic after | updates | reset',
+        '[show|hide] [all] | character [name] | beam | magic | update | news [all] | settings | size | calm | smooth | aura | beam after | magic after | updates | reset',
       immediate: true,
     })
     // A reload keeps this session's choice; a new session takes the last one
@@ -1027,7 +1075,7 @@ export const register: Register = on => {
       'Usage: /mascot [show|hide] [all] toggles, shows or hides this session\'s mascot (or every session\'s); ' +
       '/mascot character [name] lists or picks the character for this project; /mascot beam fires her beam; ' +
       '/mascot magic sends magic to your pointer; ' +
-      '/mascot update updates her to the newest version. ' +
+      '/mascot update updates her to the newest version; /mascot news says what is new (news all: every version). ' +
       'Settings, for every mascot: /mascot settings; size [small|normal|large|<px>]; calm [on|off]; smooth [on|off]; ' +
       'aura [<3 token counts>|off]; beam after [<minutes>|never]; beam agents [on|off]; ' +
       'magic after [<minutes>|never]; updates [on|off]; reset.'
@@ -1056,6 +1104,9 @@ export const register: Register = on => {
       if (updater.route === 'manual' || isUpdating) return { text: await runUpdate($) }
       updateInBackground($)
       return { text: `Updating the mascot (v${release.version})... she will say when it is done.` }
+    }
+    if (verb === 'news' && ['', 'all'].includes(target) && !extra) {
+      return { text: await newsText($, target === 'all') }
     }
     if (verb === 'character') {
       const names = await characters($)
@@ -1257,7 +1308,7 @@ export const register: Register = on => {
     const hasBackground = tasks.some(t => AGENT_TASKS.includes(t.type))
     if (hasBackground) round.hadAgents = true
     const awaited = [
-      ...tasks.filter(t => t.type === 'monitor' || (t.type === 'shell' && !isEndless(t.command ?? t.description))),
+      ...tasks.filter(t => t.type === 'shell' && !isEndless(t.command ?? t.description)),
       ...wakeups.filter(c => !c.recurring),
     ].filter(t => !round.before.has(t.id))
     const now = await quiet($.clock.now())
