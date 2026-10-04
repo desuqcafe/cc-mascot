@@ -6,7 +6,8 @@ the PC locked) or nobody has touched the keyboard or mouse for AWAY_S
 (`idle_s`, GetLastInputInfo); from the last input on, so what happened
 in those minutes counts too (`recent` keeps it). Meanwhile the overlay
 tells it what happens (`saw`): a round of work done, a turn that died, her
-waiting on you, a prompt from elsewhere. Back, with something to tell, she
+waiting on you, a prompt a chat relayed (not one you sent yourself through
+Remote Control: the overlay leaves those out). Back, with something to tell, she
 holds her note (`note`) until the card has shown it to you (the overlay
 calls `read` as the card closes) or for NOTE_KEEP_S. Only her own session's
 moments, in the local time of each.
@@ -22,7 +23,7 @@ NOTE_KEEP_S = 60 * 60
 MOST = 5  # lines on a note
 
 # What happened (`kind`: "done", "beam", "error", "waiting", "visit") and
-# when (epoch s); `about` says more where there is more: a channel's name.
+# when (epoch s); `about` says more where there is more: the chat's name.
 Moment = namedtuple("Moment", "kind at about")
 Moment.__new__.__defaults__ = (None,)
 
@@ -69,7 +70,7 @@ def lines_of(moments):
     tell(("waiting",), "Waited on you from {}", "Waited on you {} times, the last from {}")
     visits = [m for m in moments if m.kind == "visit"]
     if visits:
-        where = sorted({m.about or "Remote Control" for m in visits})
+        where = sorted({m.about or "a chat" for m in visits})
         words = "a prompt" if len(visits) == 1 else f"{len(visits)} prompts"
         lines.append(f"{words[0].upper()}{words[1:]} from {', '.join(where)}, the last at {clock(visits[-1].at)}")
     return lines[:MOST]

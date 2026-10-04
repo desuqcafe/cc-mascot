@@ -25,13 +25,13 @@ class Away_(unittest.TestCase):
         notes.saw("done", at(21))
         notes.saw("error", at(25))
         notes.saw("done", at(30))
-        notes.saw("visit", at(31), "Remote Control")
+        notes.saw("visit", at(31), "telegram")
         self.assertTrue(notes.step(at(40), idle=1, dark=False))
         self.assertEqual(notes.lines(), [
             "While you were away (26 min):",
             "  2 rounds of work done, the last at 14:30",
             "  A turn failed at 14:25",
-            "  A prompt from Remote Control, the last at 14:31",
+            "  A prompt from telegram, the last at 14:31",
         ])
 
     def test_what_happened_before_away_was_known_counts(self):
@@ -79,8 +79,8 @@ class Away_(unittest.TestCase):
         self.assertEqual(notes.lines(), ["While you were away (22 min):", "  Work done at 14:11", "  A turn failed at 14:31"])
 
     def test_channels_by_name(self):
-        lines = away.lines_of([away.Moment("visit", at(1), "telegram"), away.Moment("visit", at(2), "Remote Control")])
-        self.assertEqual(lines, ["2 prompts from Remote Control, telegram, the last at 14:02"])
+        lines = away.lines_of([away.Moment("visit", at(1), "telegram"), away.Moment("visit", at(2), "discord")])
+        self.assertEqual(lines, ["2 prompts from discord, telegram, the last at 14:02"])
 
     def test_how_long(self):
         self.assertEqual([away.how_long(s) for s in (10, 300, 3600, 3 * 3600 + 5 * 60)], ["1 min", "5 min", "1h 00m", "3h 05m"])

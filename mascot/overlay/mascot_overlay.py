@@ -483,6 +483,13 @@ def visit_of(data):
     return at, (name if kind == "channel" and isinstance(name, str) and name.strip() else VISIT_FROM.get(kind, "a chat"))
 
 
+def is_news(visit):
+    """Whether a prompt from elsewhere (`visit_of`) goes on her away note: one
+    a chat relayed, which someone else may have sent; not one you sent
+    yourself through Remote Control."""
+    return visit[1] != VISIT_FROM["bridge"]
+
+
 def read_json(path):
     """A file's JSON object, or None when it is missing, unreadable or not an object."""
     try:
@@ -1741,7 +1748,8 @@ def run_window(parent, starter):
                 if current.visit and current.visit[0] != state["visited"]:
                     # A prompt sent from elsewhere: her messenger brings it in.
                     state["visited"] = current.visit[0]
-                    notes.saw("visit", current.visit[0] / 1000, current.visit[1])
+                    if is_news(current.visit):
+                        notes.saw("visit", current.visit[0] / 1000, current.visit[1])
                     if state["prefs"].remote and state["shown"] and state["act"] is None:
                         state["delivery"] = time.monotonic()
                         redraw()

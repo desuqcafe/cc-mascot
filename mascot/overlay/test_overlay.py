@@ -450,6 +450,12 @@ class SessionFile(unittest.TestCase):
             write(overlay.SESSION_PATH, {"frame": "idle", "visit": visit})
             self.assertIsNone(overlay.read_state().visit, visit)
 
+    def test_only_a_chats_prompt_goes_on_her_away_note(self):
+        write(overlay.SESSION_PATH, {"frame": "idle", "visit": {"at": 12, "from": "channel", "name": "telegram"}})
+        self.assertTrue(overlay.is_news(overlay.read_state().visit))
+        write(overlay.SESSION_PATH, {"frame": "idle", "visit": {"at": 12, "from": "bridge"}})
+        self.assertFalse(overlay.is_news(overlay.read_state().visit))  # you sent it yourself
+
     def test_a_new_version_to_celebrate(self):
         write(overlay.SESSION_PATH, {"frame": "idle", "update": {"version": "0.15.0", "route": "clone", "celebrate": 9, "from": "0.14.1"}})
         self.assertEqual(overlay.read_state().celebrate, (9, "0.15.0"))

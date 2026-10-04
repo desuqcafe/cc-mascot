@@ -67,8 +67,8 @@ A tag under her feet names the session's project (numbered, `app ·1`,
     messenger.
   - Away notes: when nobody has touched the keyboard or mouse for 5
     minutes, or your screen is off or locked, she keeps a note of what
-    happens (work done, a turn that failed, waiting on you, prompts from
-    elsewhere). Back at your PC, she holds the note at her feet; hover her
+    happens (work done, a turn that failed, waiting on you, prompts a chat
+    sent in). Back at your PC, she holds the note at her feet; hover her
     and the card shows it, then she puts it away.
   - Like her sounds, none of it plays while she is hidden.
 - `/mascot settings` opens the settings window; the other settings commands
