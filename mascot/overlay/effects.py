@@ -557,6 +557,44 @@ def _banner(text, size, line, tint=None, plain=None):
     return _down(out)
 
 
+def _phone(w, h, line):
+    """Her messenger: a little teal phone, a mint screen with a pink heart
+    on it, three keys and a shine."""
+    S = SUPER
+    shape, d = _mask(w, h)
+    d.rounded_rectangle((S, S, (w + 1) * S, (h + 1) * S), radius=w * 0.26 * S, fill=255)
+    lit = tuple(round(c + (255 - c) * 0.35) for c in MAIN)
+    out = _filled(shape, lit, MAIN, MAIN_SHADE, line)
+    pen = ImageDraw.Draw(out)
+    pen.rounded_rectangle(((0.24 * w + 1) * S, (0.14 * h + 1) * S, (0.76 * w + 1) * S, (0.58 * h + 1) * S),
+                          radius=w * 0.1 * S, fill=PALE + (255,))
+    heart = _heart(max(4, round(w * 0.32)), ACCENT, ACCENT_SHADE, 0.5).resize(
+        (round(w * 0.32 * S),) * 2, Image.LANCZOS)
+    out.alpha_composite(heart, (round((0.5 * w + 1) * S - heart.width / 2), round((0.36 * h + 1) * S - heart.height / 2)))
+    for i in range(3):
+        cx, cy, r = (0.3 + 0.2 * i) * w + 1, 0.75 * h + 1, w * 0.06
+        pen.ellipse(((cx - r) * S, (cy - r) * S, (cx + r) * S, (cy + r) * S), fill=PALE + (255,))
+    pen.ellipse(((0.12 * w + 1) * S, (0.06 * h + 1) * S, (0.2 * w + 1) * S, (0.12 * h + 1) * S), fill=WHITE + (255,))
+    return _down(out)
+
+
+def _setlist(w, h, line):
+    """Her away note: a setlist card, white fading to mint in a teal rim,
+    a pink heart at its top and her lines in teal."""
+    S = SUPER
+    shape, d = _mask(w, h)
+    d.rounded_rectangle((S, S, (w + 1) * S, (h + 1) * S), radius=w * 0.14 * S, fill=255)
+    out = _filled(shape, WHITE, PALE, MAIN_SHADE, line)
+    pen = ImageDraw.Draw(out)
+    heart = _heart(max(4, round(w * 0.3)), ACCENT, ACCENT_SHADE, 0.5).resize((round(w * 0.3 * S),) * 2, Image.LANCZOS)
+    out.alpha_composite(heart, (round((0.5 * w + 1) * S - heart.width / 2), round((0.17 * h + 1) * S - heart.height / 2)))
+    for i, length in enumerate((0.62, 0.48, 0.56, 0.36)):
+        y = (0.38 + 0.15 * i) * h + 1
+        pen.rounded_rectangle(((0.19 * w + 1) * S, (y - 0.03 * h) * S, ((0.19 + length) * w + 1) * S, (y + 0.03 * h) * S),
+                              radius=0.03 * h * S, fill=(MAIN if i % 2 == 0 else MAIN_SHADE) + (255,))
+    return _down(out)
+
+
 def _pixel(size, color):
     """A square bit of her with a white core: a pixel flaking off."""
     img = Image.new("RGBA", (size + 2, size + 2), (0, 0, 0, 0))
@@ -599,6 +637,8 @@ def build_sprites(height):
         "flash_accent": _flash(px(64), ACCENT_LIGHT),  # smooth: drawn scaled up
         "flash_main": _flash(px(64), MAIN_LIGHT),
         "banner": _glow(_sticker(_banner(CALL, px(21), px(2)), px(2)), ACCENT_LIGHT, px(4), 0.6),
+        "messenger": _glow(_sticker(_phone(px(22), px(34), line), px(2)), MAIN_LIGHT, px(4), 0.5),
+        "away_note": _glow(_sticker(_setlist(px(27), px(34), line), px(2)), MAIN_LIGHT, px(4), 0.5),
     }
     for name, ink, light in (("main", MAIN, MAIN_LIGHT), ("accent", ACCENT, ACCENT_LIGHT)):
         sprites[f"dot_{name}"] = _glow(_ellipse(px(7), px(7), ink), light, px(3), 0.9)
@@ -1267,6 +1307,104 @@ def _magic(start, target, flight, age, t, ended, calm, note=lambda k, tint: f"no
                 r = box * (0.1 + 0.25 * p)
                 draws.append(Draw("spark_" + ("accent" if i % 2 else "main"), cx + r * math.cos(a), cy + r * math.sin(a),
                                   1.2 * (1 - p), 1 - p, 120 * p))
+    return draws
+
+
+# ---------------------------------------------------------- her messenger
+#
+# What she tells you besides her mood (the settings `nudge`, `remote` and
+# `away`), over whatever her mood shows. Miku's messenger is a little phone
+# at her upper left (her mood's symbol stands at the upper right):
+#   calling    she has waited on you long enough: it rings in bursts, waves
+#              of pink dashes beside it (calm: it rings without shaking).
+#   delivered  a prompt came from elsewhere (Remote Control, a chat): it
+#              flies in, rings twice with a note popping out, and goes.
+#   noted      what happened while you were away: a setlist card leaning on
+#              her boots until you have read it on her card.
+# Placed from the time alone, as the symbols are; a style has its own.
+
+CALL_AT = (0.1, 0.13)
+CALL_EVERY = 1.2  # a burst of rings this often
+CALL_RING_S = 0.55
+DELIVER_S = 2.4
+DELIVER_IN_S = 0.45
+DELIVER_RINGS = (0.55, 1.2)
+NOTE_AT = (0.3, 0.9)
+
+
+def _ringing(x, y, w, p, grow, color="dash"):
+    """Two waves of dashes either side of the phone at (x, y), `p` (0..1)
+    into a ring."""
+    draws = []
+    for side in (-1, 1):
+        for i in range(2):
+            r = w * (0.08 + 0.032 * i + 0.015 * p)
+            for k in (-1, 0, 1):
+                a = math.radians(side * (68 + 16 * k))
+                draws.append(Draw(color, x + r * math.sin(a), y - r * math.cos(a), grow * (0.75 + 0.15 * i),
+                                  pulse(p * 1.15 - 0.15 * i), -math.degrees(a)))
+    return draws
+
+
+def calling(w, h, t, age, calm=False):
+    """[Draw] of her messenger calling you, `age` s after it started."""
+    if STYLE:
+        return STYLE.calling(w, h, t, age, calm)
+    x, y = CALL_AT[0] * w, CALL_AT[1] * h
+    grow = pop(age)
+    beat = age % CALL_EVERY
+    ringing = age > 0.3 and beat < CALL_RING_S
+    shake = 0.0 if calm or not ringing else 14 * math.sin(beat * 52) * (1 - beat / CALL_RING_S)
+    draws = _ringing(x, y, w, beat / CALL_RING_S, grow) if ringing else []
+    draws.append(Draw("messenger", x, y + 1.5 * math.sin(t * 2.4), grow, 1.0, -8 + shake))
+    return draws
+
+
+def delivered(w, h, t, age, calm=False):
+    """[Draw] of her messenger bringing in a prompt from elsewhere, `age` s
+    in; [] once it has gone (DELIVER_S)."""
+    if STYLE:
+        return STYLE.delivered(w, h, t, age, calm)
+    if not 0 <= age < DELIVER_S:
+        return []
+    x1, y1 = CALL_AT[0] * w, CALL_AT[1] * h
+    fly = min(1.0, age / DELIVER_IN_S)
+    e = 1 - (1 - fly) ** 3
+    x = -0.12 * w + (x1 + 0.12 * w) * e
+    y = -0.1 * h + (y1 + 0.1 * h) * e - 0.06 * h * math.sin(math.pi * fly)
+    fade = min(1.0, (DELIVER_S - age) / 0.35)
+    draws = []
+    for start in DELIVER_RINGS:
+        if start <= age < start + CALL_RING_S:
+            p = (age - start) / CALL_RING_S
+            draws += _ringing(x1, y1, w, p, fade)
+    if not calm and DELIVER_IN_S <= age < DELIVER_IN_S + 0.5:
+        p = (age - DELIVER_IN_S) / 0.5
+        for i in range(5):
+            a = math.tau * i / 5 + 0.3
+            r = w * (0.03 + 0.06 * p)
+            draws.append(Draw("spark_accent" if i % 2 else "spark_main", x1 + r * math.cos(a), y1 + r * math.sin(a),
+                              1.2 * (1 - p), 1 - p, 90 * p))
+    if 0.6 <= age < 2.2:  # the message: a note rising out of it
+        p = (age - 0.6) / 1.6
+        draws.append(Draw("note_accent", x1 + 0.04 * w + 0.02 * w * math.sin(p * 6), y1 - 0.03 * h - 0.1 * h * p,
+                          pop(p * 1.6, 0, 0.25) * 0.8, min(1.0, (1 - p) / 0.3), 12 * math.sin(p * 5)))
+    shake = 0.0 if calm else sum(14 * math.sin((age - s) * 52) * (1 - (age - s) / CALL_RING_S)
+                                  for s in DELIVER_RINGS if s <= age < s + CALL_RING_S)
+    draws.append(Draw("messenger", x, y, pop(age, 0, 0.3), fade, -8 + shake))
+    return draws
+
+
+def noted(w, h, t, age, calm=False):
+    """[Draw] of the note she holds for you, `age` s after you came back."""
+    if STYLE:
+        return STYLE.noted(w, h, t, age, calm)
+    x, y = NOTE_AT[0] * w, NOTE_AT[1] * h
+    draws = [Draw("away_note", x, y - 1.5 * math.sin(t * 1.6), pop(age), 1.0, -9)]
+    if not calm:
+        p = (age % 3.0) / 0.8
+        if p < 1:
+            draws.append(Draw("spark_main", x + 0.035 * w, y - 0.035 * h, 1.2 * pulse(p), pulse(p), 90 * p))
     return draws
 
 

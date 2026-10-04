@@ -474,6 +474,32 @@ class NewVersion(unittest.TestCase):
         self.assertLess(sum(abs(a - b) for a, b in zip(middle, fx.MAIN)), 200)
 
 
+class Messenger(unittest.TestCase):
+    """What she tells you besides her mood: her messenger calling, bringing a
+    prompt in, her away note."""
+
+    def every(self, fn, ages=(0.0, 0.2, 0.5, 0.8, 1.2, 1.7, 2.3), calm=False):
+        return [d for age in ages for d in visible(fn(W, H, 5.0 + age, age, calm))]
+
+    def test_every_sprite_they_use_is_drawn(self):
+        for fn in (fx.calling, fx.delivered, fx.noted):
+            for calm in (False, True):
+                draws = self.every(fn, calm=calm)
+                self.assertTrue(draws, fn.__name__)
+                self.assertTrue({d.sprite for d in draws} <= set(SPRITES), (fn.__name__, {d.sprite for d in draws} - set(SPRITES)))
+
+    def test_it_calls_in_bursts(self):
+        def busy(age):
+            return len(visible(fx.calling(W, H, 5.0, age)))
+
+        self.assertGreater(busy(0.5), busy(fx.CALL_RING_S + 0.2))  # ringing, then quiet till the next
+
+    def test_a_delivery_comes_and_goes(self):
+        self.assertTrue(visible(fx.delivered(W, H, 5.0, 1.0)))
+        self.assertEqual(fx.delivered(W, H, 5.0, fx.DELIVER_S), [])
+        self.assertEqual(fx.delivered(W, H, 5.0, -0.1), [])
+
+
 class Calm(unittest.TestCase):
     """Calm mode: what tells something stays, what flashes or jitters goes."""
 

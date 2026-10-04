@@ -23,29 +23,40 @@ one (the session file's `update`), offers it: a press says `update`, and
 the mod's progress shows as it writes it. Its cursor magic card's button
 says `magic`: the mod sends her call to the pointer at once, to try it.
 
+Its Sound card turns her sounds on and sets their volume; "Choose sounds"
+opens a page of its own (`page` "sounds"): how long she waits on you
+before her waiting sound, and a row per moment with its own toggle, the
+sound it plays, "Try" (played here through sound.py, at the volume set,
+even with sound off), "Choose…" (a file dialog; the file is copied into
+the mascot folder's sounds/, `adopt_sound`) and "Default" (hers again).
+
 Everything in it is drawn with Pillow onto one Tk canvas, anime-sticker
 style like her symbols (soft edges, white borders, glows): a header with
-her portrait, the character card, then a card each for her size, calm
-mode (and smooth sparkles), the aura, the beam, cursor magic and updates,
+her portrait, the character card, then a card each for her size, her
+effects (calm mode, smooth sparkles), the aura, the beam, cursor magic, sound and updates,
 with widgets of its own (`Slider`, `Tiers`, `Toggle`...). Layout is in logical px (`WIDTH` wide), times the
 display's scale.
 """
 
 import colorsys
+import json
 import ctypes
 import ctypes.wintypes
 import math
 import os
 import re
+import shutil
 import sys
 import time
 import tkinter as tk
 from collections import namedtuple
+from tkinter import filedialog
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageTk
 
 import effects as fx
 import settings as cfg
+import sound
 from mascot_overlay import THEME_FILE, fmt_tokens, is_alive, mtime_of, read_json, remove, write_json
 
 LOCK_FILE = "settings-window.lock"  # {pid, session} of the open window
@@ -69,6 +80,11 @@ DISABLED = 0.4  # a widget that does nothing now is drawn this faint
 UPDATES = 100  # the updates card's height
 SCROLL_STEP = 54  # px a wheel notch scrolls the news
 MAGIC = 96  # the cursor magic card's height
+SOUND = 96  # the sound card's height
+SOUND_ROW = 60  # a moment's row on the sounds page
+NOTIFY_ROW = 92  # a row on the notifications page
+VOLUME_STEP = 5
+WAITING_SHOWN = (10, 120, 5)
 AURA_SHOWN = (0, 1_000_000, 10_000)  # low, high, step (and the least gap)
 BEAM_SHOWN = (1, 30, 1)
 MAGIC_SHOWN = (0, 30, 1)
@@ -125,11 +141,12 @@ _fonts = {}
 
 
 def font(kind, px, text=""):
-    """A font `px` tall; Yu Gothic for text that is not plain ASCII, Malgun
-    Gothic for Hangul (Yu Gothic has none)."""
+    """A font `px` tall; Yu Gothic for text that is not plain ASCII (an
+    ellipsis aside: Yu Gothic's sits mid-line), Malgun Gothic for Hangul
+    (Yu Gothic has none)."""
     if fx.hangul(text):
         kind = "kr"
-    elif any(ord(c) > 127 for c in text):
+    elif any(ord(c) > 127 and c != "…" for c in text):
         kind = "jp"
     key = (kind, round(px))
     if key not in _fonts:
@@ -629,9 +646,13 @@ class Choice(Widget):
 class Button(Widget):
     """A pill button: outlined, filled under the pointer."""
 
-    def __init__(self, app, box, words, action):
+    def __init__(self, app, box, words, action, enabled=lambda: True):
         super().__init__(app, box)
-        self.words, self.action = words, action
+        self.words, self.action, self.is_enabled = words, action, enabled
+
+    @property
+    def enabled(self):
+        return self.is_enabled()
 
     def draw(self, img):
         t, u = self.app.theme, self.app.u
@@ -909,7 +930,12 @@ class App:
         self.notes = read_json(os.path.join(plugin_root, "whatsnew.json")) or {}
         self.asked = False
         self.read_release()
-        self.page = "settings"  # or "news": every version's news
+        # Or "news": every version's news; "sounds": a row per moment;
+        # "notify": what else she tells you (nudge, remote, away).
+        self.page = "settings"
+        self.player = None  # plays a sound tried here (sound.Player), made at the first try
+        # A moment's file of yours while its sound is off: turned on again, it comes back.
+        self.last_sounds = {m: v for m, v in self.prefs.sounds.items() if isinstance(v, str)}
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -1006,7 +1032,7 @@ class App:
         update = (data if data is not None else self.session_data()).get("update")
         if not isinstance(update, dict) or not isinstance(update.get("version"), str):
             return False
-        release = {k: update[k] for k in ("version", "latest", "state", "message", "from")
+        release = {k: update[k] for k in ("version", "latest", "state", "message", "from", "installed")
                    if isinstance(update.get(k), str)}
         if release.get("state") in ("updating", "updated", "failed"):
             self.asked = False  # the mod has answered
@@ -1017,7 +1043,7 @@ class App:
     def release_offer(self):
         """The update button's words, when there is an update to offer."""
         r = self.release
-        if self.asked or r.get("state") in ("updating", "updated"):
+        if self.asked or r.get("state") in ("updating", "updated") or r.get("installed"):
             return ""
         if r.get("state") == "failed":
             return "Try again"
@@ -1033,6 +1059,8 @@ class App:
             return "Updated!", r.get("message", "")
         if state == "failed":
             return "The update failed", r.get("message", "")
+        if r.get("installed"):
+            return f"v{r['installed']} is installed", "Type /reload-plugins in her session to meet her."
         if r.get("latest"):
             return f"v{r['latest']} is out!", f"She is v{version} now."
         lead = headline(self.news())
@@ -1059,8 +1087,8 @@ class App:
             self.build()
 
     def on_escape(self):
-        """Esc: back from the news, else closes."""
-        if self.page == "news":
+        """Esc: back from the news or the sounds, else closes."""
+        if self.page != "settings":
             self.show_page("settings")
         else:
             self.close()
@@ -1124,6 +1152,87 @@ class App:
         """Cursor magic's minutes, or what they were when last on."""
         return self.last_magic if self.prefs.magicAfter is False else self.prefs.magicAfter
 
+    # ---- sounds
+
+    def frames_dir(self):
+        return os.path.join(self.frames_root, self.character)
+
+    def sounds_dir(self):
+        return os.path.join(self.state_dir, sound.FOLDER)
+
+    def set_sound(self, moment, choice):
+        if isinstance(choice, str):
+            self.last_sounds[moment] = choice
+        elif choice is True:
+            self.last_sounds.pop(moment, None)
+        self.change(sounds={**self.prefs.sounds, moment: choice})
+
+    def toggle_sound(self, moment, on):
+        """A moment's sound off, or on again: the file of yours it had, else hers."""
+        self.set_sound(moment, self.last_sounds.get(moment, True) if on else False)
+
+    def sound_words(self, moment):
+        """What a moment plays, in words, and the color to say it in."""
+        t, choice = self.theme, self.prefs.sounds[moment]
+        if choice is False:
+            return "None", t.muted
+        if isinstance(choice, str):
+            if os.path.isfile(sound.own_path(choice, self.state_dir)):
+                return choice, t.primaryDeep
+            return f"{choice} is missing: hers plays", t.accentDeep
+        return f"{t.name}'s own", t.ink
+
+    def try_sound(self, moment):
+        """Plays a moment's sound here, at the volume set, sound on or off."""
+        choice = self.prefs.sounds[moment]
+        path = sound.resolve(choice if choice is not False else True, moment, self.frames_dir(), self.state_dir)
+        if path is None:
+            self.problem = "She has no sound of her own for that one."
+            self.refresh({"problem"})
+            return
+        if self.player is None:
+            self.player = sound.Player(os.path.join(self.state_dir, sound.GATE_FILE))
+        self.player.play(path, self.prefs.volume, sound.PRIORITY[moment], force=True)
+
+    def choose_sound(self, moment):
+        """A file dialog for a moment's sound; the file picked is adopted."""
+        path = filedialog.askopenfilename(parent=self.root, title=f"A sound for: {MOMENT_NAMES[moment][0]}",
+                                          filetypes=[("Sounds (.wav, .mp3)", "*.wav *.mp3")])
+        if path:
+            self.adopt_sound(moment, path)
+
+    def adopt_sound(self, moment, path):
+        """Makes the file at `path` the moment's sound: checked (a .wav or
+        .mp3 that plays here, up to sound.MAX_S), copied into sounds/ and
+        played once. Whether it was taken; why not in `problem`."""
+        problem, name = "", None
+        seconds = sound.length_of(path) if os.path.splitext(path)[1].lower() in (".wav", ".mp3") else None
+        if seconds is None:
+            problem = "That file does not play here: a .wav or .mp3, please."
+        elif seconds > sound.MAX_S:
+            problem = f"That one lasts {seconds:.0f} s: up to {sound.MAX_S:.0f} s, please."
+        else:
+            try:
+                name = copy_in(path, self.sounds_dir())
+            except OSError as err:
+                problem = f"Could not copy it: {err.strerror or err}"
+        self.problem = problem
+        self.refresh({"problem"})
+        if problem:
+            return False
+        self.set_sound(moment, name)
+        self.flush()
+        self.try_sound(moment)
+        return True
+
+    def open_sounds(self):
+        try:
+            os.makedirs(self.sounds_dir(), exist_ok=True)
+            os.startfile(self.sounds_dir())  # noqa: S606 - the user's own sounds folder
+        except OSError as err:
+            self.problem = f"Could not open it: {err.strerror or err}"
+            self.refresh({"problem"})
+
     def set_remember(self, on):
         self.remember = on
         self.refresh({"remember"})
@@ -1149,7 +1258,7 @@ class App:
         W, M = WIDTH, 18
         col = (W - 3 * M) / 2
         CAST = 100  # the character card's height
-        H = 528 + CAST + 14 + MAGIC + 14 + UPDATES + 14
+        H = 548 + CAST + 14 + MAGIC + 14 + SOUND + 14 + UPDATES + 14
         self.bg = Image.new("RGBA", (round(W * u), round(H * u)), t.paper + (255,))
         self.portrait = portrait(self.art)
         draw_header(self.bg, t, u, self.portrait)
@@ -1157,6 +1266,10 @@ class App:
         top = cast_top + CAST + 14
         if self.page == "news":
             return self.layout_news(W, M, H, cast_top)
+        if self.page == "sounds":
+            return self.layout_sounds(W, M, H, cast_top)
+        if self.page == "notify":
+            return self.layout_notify(W, M, H, cast_top)
 
         def card(x, y, w, h, jp, en, lines, value=None):
             """A card, its chip and title, and its description; (x, y) of its inside."""
@@ -1184,42 +1297,47 @@ class App:
         text(self.bg, ((x + 16 + 196 - 11) * u, (y + 158) * u), f"{cfg.SIZE_RANGE[1]} px", "regular", 10.5 * u, t.muted, "ra")
         self.add(Preview(self, box(x + col - 16 - 112, y + 50, 112, 132), self.art), "size")
 
-        # Calm mode
-        x, y = card(M, top + 196 + 14, col, 120, "おだやか", "Calm mode",
-                    ["No glitch, particles, flicker or flashes.", "Her symbols and colors stay."])
-        self.add(Toggle(self, box(x + col - 16 - 44, y + 14, 44, 24), lambda: self.prefs.calm,
-                        lambda v: self.change(calm=v)), "calm")
-        self.add(Toggle(self, box(x + 16, y + 84, col - 32, 26), lambda: self.prefs.smooth,
-                        lambda v: self.change(smooth=v), "Smooth sparkles", "heavier while she works",
+        # Effects: calm mode and smooth sparkles, side by side (smooth has
+        # nothing to do in calm mode, and says so)
+        x, y = card(M, top + 196 + 14, col, 140, "エフェクト", "Effects", [])
+        self.add(Toggle(self, box(x + 16, y + 42, col - 32, 26), lambda: self.prefs.calm,
+                        lambda v: self.change(calm=v), "Calm mode"), "calm")
+        text(self.bg, ((x + 70) * u, (y + 76) * u), "No glitch, particles, flicker or flashes.", "regular", 11.5 * u,
+             t.muted, "lm")
+        self.add(Toggle(self, box(x + 16, y + 88, col - 32, 26), lambda: self.prefs.smooth,
+                        lambda v: self.change(smooth=v), "Smooth sparkles", "uses more CPU",
                         enabled=lambda: not self.prefs.calm), "smooth", "calm")
+        self.add(Label(self, box(x + 70, y + 114, col - 86, 16), lambda: (
+            "Off in calm mode: it has no sparkles." if self.prefs.calm
+            else "Sparkles move as smoothly as her symbols."), "regular", 11.5 * u, lambda: t.muted), "smooth", "calm")
 
         # The aura
         x2 = M + col + M
-        x, y = card(x2, top, col, 150, "オーラ", "Aura",
+        x, y = card(x2, top, col, 160, "オーラ", "Aura",
                     ["She glows as the context grows, brighter", "at each step, until she overloads."])
         self.add(Toggle(self, box(x + col - 16 - 44, y + 14, 44, 24), lambda: self.prefs.aura is not False,
                         lambda v: self.change(aura=self.last_aura if v else False)), "aura")
-        self.add(Tiers(self, box(x + 16, y + 86, col - 32, 54), lambda: self.prefs.aura,
+        self.add(Tiers(self, box(x + 16, y + 92, col - 32, 54), lambda: self.prefs.aura,
                        lambda v, final: self.change(final, aura=v)), "aura")
 
         # The beam
-        x, y = card(x2, top + 150 + 14, col, 166, "ビーム", t.beam,
+        x, y = card(x2, top + 160 + 14, col, 176, "ビーム", t.beam,
                     ["Her big finish when a round of work is done:", "after a long one, or one agents helped with."])
-        self.add(Toggle(self, box(x + 16, y + 92, 150, 26), lambda: self.prefs.beamAfter is not False,
+        self.add(Toggle(self, box(x + 16, y + 96, 150, 26), lambda: self.prefs.beamAfter is not False,
                         lambda v: self.change(beamAfter=self.last_minutes if v else False), "After rounds of"),
                  "beamAfter")
-        self.add(Slider(self, box(x + 168, y + 90, col - 168 - 16 - 54, 30), *BEAM_SHOWN,
+        self.add(Slider(self, box(x + 168, y + 94, col - 168 - 16 - 54, 30), *BEAM_SHOWN,
                         lambda: self.prefs.beamAfter or self.last_minutes,
                         lambda v, final: self.change(final, beamAfter=v),
                         enabled=lambda: self.prefs.beamAfter is not False), "beamAfter")
-        self.add(Label(self, box(x + col - 16 - 54, y + 92, 54, 26),
+        self.add(Label(self, box(x + col - 16 - 54, y + 96, 54, 26),
                        lambda: f"{self.prefs.beamAfter or self.last_minutes} min", "bold", 13.5 * u,
                        lambda: t.primaryDeep if self.prefs.beamAfter else t.muted, "rm"), "beamAfter")
-        self.add(Toggle(self, box(x + 16, y + 128, col - 32, 26), lambda: self.prefs.beamForAgents,
+        self.add(Toggle(self, box(x + 16, y + 134, col - 32, 26), lambda: self.prefs.beamForAgents,
                         lambda v: self.change(beamForAgents=v), "When agents helped"), "beamForAgents")
 
         # Cursor magic
-        my = top + 330 + 14
+        my = top + 350 + 14
         x, y = card(M, my, W - 2 * M, MAGIC, "まほう", "Cursor magic",
                     ["When a round of work ends, she sends magic", "to your pointer, on any display."])
         panel = x + 380
@@ -1235,9 +1353,20 @@ class App:
         self.add(Label(self, box(panel + pw - 54, y + 14, 54, 26), lambda: f"{self.magic_minutes()} min", "bold", 13.5 * u,
                        lambda: t.primaryDeep if on() else t.muted, "rm"), "magicAfter")
         self.add(Button(self, box(panel + pw - 130, y + 52, 130, 30), "Send one now", lambda: say("magic")))
+        self.add(Button(self, box(panel + pw - 130 - 10 - 150, y + 52, 150, 30), "Notifications…",
+                        lambda: self.show_page("notify")))
+
+        # Sound
+        sy = my + MAGIC + 14
+        x, y = card(M, sy, W - 2 * M, SOUND, "サウンド", "Sound",
+                    ["A chime when she waits on you, a cheer when", "work is done, and more. Quiet while hidden."])
+        self.add(Toggle(self, box(panel, y + 14, 150, 26), lambda: self.prefs.sound,
+                        lambda v: self.change(sound=v), "Sounds on"), "sound")
+        self.volume_widgets(panel + 152, y + 12, pw - 152)
+        self.add(Button(self, box(panel + pw - 150, y + 52, 150, 30), "Choose sounds…", lambda: self.show_page("sounds")))
 
         # Updates
-        uy = my + MAGIC + 14
+        uy = sy + SOUND + 14
         x, y = card(M, uy, W - 2 * M, UPDATES, "アップデート", "Updates", [])
         self.add(Label(self, box(x + 16, y + 40, 330, 18), lambda: (
             "Once a day, a look at her newest version on GitHub." if self.prefs.checkUpdates
@@ -1291,6 +1420,131 @@ class App:
         self.add(Label(self, ((M + 4) * u, fy * u, 400 * u, 32 * u), lambda: "Scroll for older versions. Esc goes back.",
                        "regular", 12 * u, lambda: t.muted))
         self.add(Button(self, ((W - M - 104) * u, fy * u, 104 * u, 32 * u), "Back", lambda: self.show_page("settings")))
+
+    def volume_widgets(self, x, y, w):
+        """The volume's slider and its figure, `w` wide from (x, y)."""
+        t, u = self.theme, self.u
+        self.add(Slider(self, (x * u, y * u, (w - 58) * u, 30 * u), *cfg.VOLUME_RANGE, VOLUME_STEP,
+                        lambda: self.prefs.volume, lambda v, final: self.change(final, volume=v),
+                        enabled=lambda: self.prefs.sound), "volume", "sound")
+        self.add(Label(self, ((x + w - 54) * u, (y + 2) * u, 54 * u, 26 * u), lambda: f"{self.prefs.volume}%",
+                       "bold", 13.5 * u, lambda: t.primaryDeep if self.prefs.sound else t.muted, "rm"), "volume", "sound")
+
+    def layout_sounds(self, W, M, H, top):
+        """The sounds page: sound on, its volume, how long she waits on you
+        first, a row per moment, and the way back."""
+        t, u = self.theme, self.u
+        fy = H - 14 - 32
+        h = fy - 14 - top
+        draw_card(self.bg, t, u, M, top, W - 2 * M, h)
+        chip_w = draw_chip(self.bg, t, u, M + 16, top + 15, "サウンド")
+        text(self.bg, ((M + 16) * u + chip_w + 8 * u, (top + 26) * u), "Sounds", "bold", 15.5 * u, t.ink, "lm")
+        text(self.bg, ((M + 16) * u, (top + 48) * u), "Each moment plays her own sound, a file of yours, or nothing.",
+             "regular", 12 * u, t.muted, "la")
+        x0, cw = M + 16, W - 2 * M - 32
+
+        def box(x, y, w, h):
+            return (x * u, y * u, w * u, h * u)
+
+        y = top + 76
+        self.add(Toggle(self, box(x0, y + 2, 150, 26), lambda: self.prefs.sound,
+                        lambda v: self.change(sound=v), "Sounds on"), "sound")
+        text(self.bg, ((x0 + 290) * u, (y + 15) * u), "Volume", "semibold", 13 * u, t.ink, "lm")
+        self.volume_widgets(x0 + 400, y, cw - 400)
+        y += 40
+        text(self.bg, ((x0 + 290) * u, (y + 15) * u), "Waiting after", "semibold", 13 * u, t.ink, "lm")
+        self.add(Slider(self, box(x0 + 400, y, cw - 400 - 58, 30), *WAITING_SHOWN,
+                        lambda: self.prefs.waitingAfter, lambda v, final: self.change(final, waitingAfter=v)),
+                 "waitingAfter")
+        self.add(Label(self, box(x0 + cw - 54, y + 2, 54, 26), lambda: f"{self.prefs.waitingAfter} s",
+                       "bold", 13.5 * u, lambda: t.primaryDeep, "rm"), "waitingAfter")
+        y += 48
+        ImageDraw.Draw(self.bg).line((x0 * u, y * u, (x0 + cw) * u, y * u), fill=t.track + (255,), width=max(1, round(u)))
+        y += 12
+        for moment in cfg.MOMENTS:
+            if moment == "intro":
+                text(self.bg, (x0 * u, (y + 10) * u), "Coming and going", "bold", 12 * u, t.muted, "lm")
+                y += 24
+            self.sound_row(moment, x0, y, cw)
+            y += SOUND_ROW
+        where = f"Yours are copied into {self.sounds_dir()}. Up to {sound.MAX_S:.0f} s, .wav or .mp3."
+        self.add(Note(self, box(x0, y + 8, cw, 36), lambda: where, 11.5 * u, lambda: t.muted, 18 * u))
+        self.add(Label(self, box(M + 4, fy, 400, 32), lambda: self.problem or "Never two at once, and never while she is hidden.",
+                       "regular", 12 * u, lambda: t.accentDeep if self.problem else t.muted), "problem")
+        self.add(Button(self, box(W - M - 104, fy, 104, 32), "Back", lambda: self.show_page("settings")))
+        self.add(Link(self, box(W - M - 104 - 16 - 150, fy, 150, 32), "Open sounds folder", self.open_sounds))
+
+    def layout_notify(self, W, M, H, top):
+        """The notifications page: her call when she waits on you, prompts
+        from elsewhere, her away note; each a switch and what it does."""
+        t, u = self.theme, self.u
+        fy = H - 14 - 32
+        h = fy - 14 - top
+        draw_card(self.bg, t, u, M, top, W - 2 * M, h)
+        chip_w = draw_chip(self.bg, t, u, M + 16, top + 15, "でんごん")
+        text(self.bg, ((M + 16) * u + chip_w + 8 * u, (top + 26) * u), "Notifications", "bold", 15.5 * u, t.ink, "lm")
+        text(self.bg, ((M + 16) * u, (top + 48) * u), f"More ways {t.name} tells you what is going on. Each is off until you turn it on.",
+             "regular", 12 * u, t.muted, "la")
+        x0, cw = M + 16, W - 2 * M - 32
+        y = top + 84
+        pictures = messenger_sprites(self.frames_dir(), round(420 * 1.5 * u))
+        rows = (
+            ("nudge", "Call me", lambda: (
+                f"When she has waited on you {self.prefs.waitingAfter} s, her messenger calls and",
+                "her terminal blinks in the taskbar. Click her to bring her terminal forward.")),
+            ("remote", "Remote Control", lambda: (
+                "A prompt you send from the Claude app on your phone, the web or a chat",
+                "comes in with her messenger.")),
+            ("away", "While you were away", lambda: (
+                "Away 5 min or more, or the screen off: she keeps a note of what happened.",
+                "When you are back, hover her to read it.")),
+        )
+        for (key, title, about), names in zip(rows, (("messenger",), ("messenger",), ("away_note",))):
+            self.notify_row(key, title, about, x0, y, cw)
+            # What it looks like, in her own style, at the row's right.
+            right = (x0 + cw - 20) * u
+            for name in reversed(names):
+                img = pictures.get(name)
+                if img:
+                    put(self.bg, img, right - img.width, (y + 30) * u - img.height / 2)
+                    right -= img.width + 4 * u
+            y += NOTIFY_ROW
+        self.add(Note(self, ((x0 * u), (y + 4) * u, cw * u, 40 * u), lambda: (
+            "Windows Terminal shows several sessions in one window: it comes forward on the tab you left it at."),
+            11.5 * u, lambda: t.muted, 18 * u))
+        self.add(Label(self, ((M + 4) * u, fy * u, 400 * u, 32 * u), lambda: self.problem or "Quiet while she is hidden.",
+                       "regular", 12 * u, lambda: t.accentDeep if self.problem else t.muted), "problem")
+        self.add(Button(self, ((W - M - 104) * u, fy * u, 104 * u, 32 * u), "Back", lambda: self.show_page("settings")))
+
+    def notify_row(self, key, title, about, x, y, w):
+        """A row of the notifications page: its switch, name and what it does."""
+        t, u = self.theme, self.u
+        self.add(Toggle(self, (x * u, (y + 4) * u, 44 * u, 26 * u), lambda: getattr(self.prefs, key),
+                        lambda v: self.change(**{key: v})), key)
+        text(self.bg, ((x + 56) * u, (y + 17) * u), title, "semibold", 13.5 * u, t.ink, "lm")
+        for i in range(2):
+            self.add(Label(self, ((x + 56) * u, (y + 30 + 18 * i) * u, (w - 56) * u, 18 * u), lambda i=i: about()[i],
+                           "regular", 12 * u, lambda: t.muted), key, "waitingAfter")
+
+    def sound_row(self, moment, x, y, w):
+        """A moment's row: its toggle, name, what it plays, Try, Choose…, Default."""
+        t, u = self.theme, self.u
+        title, about = MOMENT_NAMES[moment]
+
+        def box(bx, by, bw, bh):
+            return (bx * u, by * u, bw * u, bh * u)
+
+        self.add(Toggle(self, box(x, y + 13, 44, 26), lambda: self.prefs.sounds[moment] is not False,
+                        lambda v: self.toggle_sound(moment, v)), "sounds")
+        text(self.bg, ((x + 56) * u, (y + 17) * u), title, "semibold", 13.5 * u, t.ink, "lm")
+        text(self.bg, ((x + 56) * u, (y + 35) * u), about, "regular", 11.5 * u, t.muted, "lm")
+        self.add(Label(self, box(x + 290, y + 13, 176, 26),
+                       lambda: fit(self.sound_words(moment)[0], "semibold", 12.5 * u, 174 * u),
+                       "semibold", 12.5 * u, lambda: self.sound_words(moment)[1]), "sounds")
+        self.add(Button(self, box(x + w - 222, y + 12, 56, 28), "Try", lambda: self.try_sound(moment)))
+        self.add(Button(self, box(x + w - 160, y + 12, 84, 28), "Choose…", lambda: self.choose_sound(moment)))
+        self.add(Button(self, box(x + w - 70, y + 12, 70, 28), "Default", lambda: self.set_sound(moment, True),
+                        enabled=lambda: isinstance(self.prefs.sounds[moment], str)), "sounds")
 
     def add(self, widget, *keys):
         """A widget whose look depends on the settings `keys` (and "problem",
@@ -1414,6 +1668,71 @@ class App:
         except OSError:
             pass
         self.root.destroy()
+
+
+# A moment's name and what it is, on the sounds page.
+def messenger_sprites(frames_dir, height):
+    """Her messenger and away note as the overlay draws them,
+    in her look, for a mascot `height` px tall (the notifications page's
+    pictures); {} when her look cannot be read."""
+    try:
+        with open(os.path.join(frames_dir, THEME_FILE), encoding="utf-8") as f:
+            theme = json.load(f)
+        fx.use(fx.look_of(theme))
+        sprites = fx.build_sprites(height)
+    except (OSError, ValueError):
+        return {}
+    return {name: sprites[name] for name in ("messenger", "away_note") if name in sprites}
+
+
+MOMENT_NAMES = {
+    "waiting": ("Waiting on you", "a question or a permission, once"),
+    "done": ("Work done", "a round of work is over"),
+    "beam": ("Her big finish", "a long round, or one agents helped"),
+    "error": ("Something broke", "a turn died on an error"),
+    "magic": ("Cursor magic", "as it flies to your pointer"),
+    "intro": ("She appears", "every show"),
+    "outro": ("She goes", "every hide, and as a session ends"),
+}
+
+
+def safe_name(path):
+    """A file's name as `sounds` takes it (settings.SOUND_FILE): what a
+    file name may not hold, out; a long one cut short."""
+    stem, ext = os.path.splitext(os.path.basename(path))
+    stem = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", stem).strip() or "sound"
+    return stem[:100] + ext.lower()
+
+
+def copy_in(path, folder):
+    """Copies the sound file at `path` into `folder` (yours); its name
+    there. The same file already there is taken as it is; another file of
+    that name stays, and this one is numbered."""
+    os.makedirs(folder, exist_ok=True)
+    name = safe_name(path)
+    stem, ext = os.path.splitext(name)
+    n = 1
+    while True:
+        target = os.path.join(folder, name)
+        if not os.path.exists(target):
+            shutil.copyfile(path, target)
+            return name
+        if same_file(path, target):
+            return name
+        n += 1
+        name = f"{stem}-{n}{ext}"
+
+
+def same_file(a, b):
+    try:
+        if os.path.samefile(a, b):
+            return True
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return False
 
 
 def say(line):

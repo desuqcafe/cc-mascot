@@ -405,6 +405,11 @@ class NewVersionHint(unittest.TestCase):
         _, lines = overlay.card_lines("idle", {"newVersion": "soon"}, NOW_MS)
         self.assertFalse(any("is out" in str(line) for line in lines))
 
+    def test_a_version_installed_since_she_loaded_asks_for_a_reload(self):
+        _, lines = overlay.card_lines("idle", {"newVersion": "0.19.0", "installed": "0.19.0"}, NOW_MS)
+        self.assertIn("v0.19.0 installed \u00b7 /reload-plugins", lines)
+        self.assertFalse(any("is out" in str(line) for line in lines))
+
 
 class SessionFile(unittest.TestCase):
     def setUp(self):
@@ -412,11 +417,11 @@ class SessionFile(unittest.TestCase):
 
     def test_reads_frame_info_and_visibility(self):
         write(overlay.SESSION_PATH, {"frame": "waiting", "info": {"tool": "Bash"}, "visible": False, "visibleAt": 5})
-        self.assertEqual(overlay.read_state(), ("waiting", {"tool": "Bash"}, (False, 5), False, 0, None, None, None))
+        self.assertEqual(overlay.read_state(), ("waiting", {"tool": "Bash"}, (False, 5), False, 0, None, None, None, None, None))
 
     def test_an_unknown_frame_is_idle_and_no_choice_is_none(self):
         write(overlay.SESSION_PATH, {"frame": "dancing"})
-        self.assertEqual(overlay.read_state(), ("idle", {}, None, False, 0, None, None, None))
+        self.assertEqual(overlay.read_state(), ("idle", {}, None, False, 0, None, None, None, None, None))
 
     def test_a_call_to_the_pointer(self):
         write(overlay.SESSION_PATH, {"frame": "happy", "call": {"at": 12}})
@@ -426,6 +431,24 @@ class SessionFile(unittest.TestCase):
         for call in ({}, {"at": "now"}, {"at": True}, 12, "yes"):
             write(overlay.SESSION_PATH, {"frame": "happy", "call": call})
             self.assertIsNone(overlay.read_state().call, call)
+
+    def test_a_cue_for_a_sound(self):
+        write(overlay.SESSION_PATH, {"frame": "beam", "cue": {"at": 12, "moment": "beam"}})
+        self.assertEqual(overlay.read_state().cue, (12, "beam", False))
+        write(overlay.SESSION_PATH, {"frame": "idle", "cue": {"at": 13, "moment": "intro", "test": True}})
+        self.assertEqual(overlay.read_state().cue, (13, "intro", True))
+        for cue in ({"at": 12}, {"at": 12, "moment": "boom"}, {"at": True, "moment": "done"}, "done"):
+            write(overlay.SESSION_PATH, {"frame": "happy", "cue": cue})
+            self.assertIsNone(overlay.read_state().cue, cue)
+
+    def test_a_prompt_from_elsewhere(self):
+        write(overlay.SESSION_PATH, {"frame": "thinking", "visit": {"at": 12, "from": "bridge"}})
+        self.assertEqual(overlay.read_state().visit, (12, "Remote Control"))
+        write(overlay.SESSION_PATH, {"frame": "thinking", "visit": {"at": 13, "from": "channel", "name": "telegram"}})
+        self.assertEqual(overlay.read_state().visit, (13, "telegram"))
+        for visit in ({"at": 12}, {"at": 12, "from": "phone"}, {"at": True, "from": "bridge"}, "bridge"):
+            write(overlay.SESSION_PATH, {"frame": "idle", "visit": visit})
+            self.assertIsNone(overlay.read_state().visit, visit)
 
     def test_a_new_version_to_celebrate(self):
         write(overlay.SESSION_PATH, {"frame": "idle", "update": {"version": "0.15.0", "route": "clone", "celebrate": 9, "from": "0.14.1"}})
@@ -540,6 +563,30 @@ class Slots(unittest.TestCase):
         overlay.release_slot(1)
         self.assertEqual(overlay.claim_slot(self.parent), (0, False))
 
+    def test_a_newer_overlay_of_its_claude_code_replaces_it(self):
+        self.assertFalse(overlay.is_replaced(self.parent))  # nobody has claimed it
+        overlay.claim_session(self.parent)
+        self.assertFalse(overlay.is_replaced(self.parent))  # ours
+        # A reload's new overlay started while this one still ran.
+        write(overlay.owner_path(), {"pid": self.parent, "parent": self.parent, "key": "me"})
+        self.assertTrue(overlay.is_replaced(self.parent))
+        overlay.release_session()
+        self.assertTrue(os.path.exists(overlay.owner_path()))  # not ours to remove
+
+    def test_only_a_live_overlay_of_its_own_claude_code_replaces_it(self):
+        write(overlay.owner_path(), {"pid": gone_pid(), "parent": self.parent, "key": "me"})
+        self.assertFalse(overlay.is_replaced(self.parent))  # it is gone
+        write(overlay.owner_path(), {"pid": self.parent, "parent": 4242, "key": "me"})
+        self.assertFalse(overlay.is_replaced(self.parent))  # another Claude Code's
+        write(overlay.owner_path(), "")
+        self.assertFalse(overlay.is_replaced(self.parent))  # being written
+
+    def test_the_session_claim_goes_with_its_overlay(self):
+        overlay.claim_session(self.parent)
+        overlay.release_session()
+        self.assertFalse(os.path.exists(overlay.owner_path()))
+        self.assertEqual(overlay.claim_slot(self.parent), (0, False))  # not a spot
+
     def test_release_leaves_another_overlays_spot(self):
         self.lock(0, self.parent)
         overlay.release_slot(0)
@@ -637,6 +684,11 @@ class Sweep(unittest.TestCase):
         overlay.sweep()
         self.assertEqual(sorted(os.listdir(overlay.SESSIONS_DIR)), ["fresh.json", "me.json"])
         self.assertEqual(sorted(os.listdir(overlay.SLOTS_DIR)), ["0.pos.json", "1.lock"])
+
+    def test_a_gone_overlays_session_claim_is_swept(self):
+        write(overlay.owner_path(), {"pid": gone_pid(), "parent": 77, "key": "me"})
+        overlay.sweep()
+        self.assertEqual(os.listdir(overlay.SLOTS_DIR), [])
 
     def test_the_start_keeps_the_lock_its_reloaded_predecessor_left(self):
         write(overlay.slot_path(0), {"pid": gone_pid(), "parent": 4242})

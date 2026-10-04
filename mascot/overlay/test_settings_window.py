@@ -81,10 +81,10 @@ class Window(unittest.TestCase):
         return next(w for w in self.app.widgets if isinstance(w, sw.Toggle) and key in w.keys)
 
     def test_it_draws_at_the_displays_scale(self):
-        self.assertEqual(self.app.image().size, (sw.WIDTH, 866))
+        self.assertEqual(self.app.image().size, (sw.WIDTH, 996))
         big = sw.App(self.state, MIKU, show=False, scale=1.5)
         try:
-            self.assertEqual(big.image().size, (round(sw.WIDTH * 1.5), 1299))
+            self.assertEqual(big.image().size, (round(sw.WIDTH * 1.5), 1494))
         finally:
             big.root.destroy()
 
@@ -209,6 +209,145 @@ class Window(unittest.TestCase):
         self.assertEqual(saved(self.app)["beamAfter"], 90)
 
 
+def a_wav(path, seconds):
+    """A silent WAV `seconds` long."""
+    import wave
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\0\0" * round(8000 * seconds))
+    return path
+
+
+class Sounds(unittest.TestCase):
+    """The sound card and the sounds page. Nothing is heard: the player is stood in for."""
+
+    def setUp(self):
+        self.state = tempfile.mkdtemp()
+        self.app = sw.App(self.state, MIKU, show=False, scale=1.0)
+        self.played = []
+        test = self
+
+        class Player:
+            def play(self, path, volume, priority=0, force=False):
+                test.played.append((os.path.relpath(path, os.path.join(MIKU, "..")) if "frames" in path else
+                                    os.path.basename(path), volume, force))
+                return True
+
+        self.app.player = Player()
+
+    def tearDown(self):
+        self.app.root.destroy()
+
+    def button(self, words, n=0):
+        return [w for w in self.app.widgets if isinstance(w, sw.Button) and w.words == words][n]
+
+    def row(self, kind, moment):
+        """A moment's widget of `kind` on the sounds page, by row."""
+        return [w for w in self.app.widgets if isinstance(w, kind) and "sounds" in w.keys][cfg.MOMENTS.index(moment)]
+
+    def test_the_card_turns_sound_on_and_sets_the_volume(self):
+        on = next(w for w in self.app.widgets if isinstance(w, sw.Toggle) and w.keys == {"sound"})
+        volume = next(w for w in self.app.widgets if isinstance(w, sw.Slider) and "volume" in w.keys)
+        self.assertFalse(volume.enabled)  # sound is off by default
+        click(self.app, on)
+        self.assertTrue(volume.enabled)
+        x, y, w, h = volume.box
+        click(self.app, volume, x + w - 11)
+        self.assertEqual(saved(self.app), {"sound": True, "volume": 100})
+        volume.wheel(-1)
+        self.assertEqual(saved(self.app), {"sound": True, "volume": 100 - sw.VOLUME_STEP})
+
+    def test_choose_sounds_is_a_page_of_its_own(self):
+        size = self.app.image().size
+        click(self.app, self.button("Choose sounds…"))
+        self.assertEqual(self.app.page, "sounds")
+        self.assertEqual(self.app.image().size, size)
+        self.app.on_escape()
+        self.assertEqual(self.app.page, "settings")
+        self.app.show_page("sounds")
+        click(self.app, self.button("Back"))
+        self.assertEqual(self.app.page, "settings")
+
+    def test_a_moment_off_and_on_keeps_a_file_of_yours(self):
+        cfg.save(self.app.path, sounds={**cfg.SOUNDS, "done": "ding.wav"})
+        self.app.poll()
+        app = sw.App(self.state, MIKU, show=False, scale=1.0)  # one opened with a file picked already
+        try:
+            app.show_page("sounds")
+            toggle = [w for w in app.widgets if isinstance(w, sw.Toggle) and "sounds" in w.keys][1]
+            click(app, toggle)
+            self.assertEqual(saved(app)["sounds"], {"done": False})
+            click(app, toggle)
+            self.assertEqual(saved(app)["sounds"], {"done": "ding.wav"})
+        finally:
+            app.root.destroy()
+
+    def test_try_plays_hers_at_the_volume_even_with_sound_off(self):
+        self.app.show_page("sounds")
+        click(self.app, self.button("Try", cfg.MOMENTS.index("intro")))  # intro is off: hers anyway
+        self.assertEqual(self.played, [(os.path.join("miku", "sounds", "intro.wav"), 60, True)])
+
+    def test_a_file_picked_is_copied_in_played_and_can_go_back_to_hers(self):
+        self.app.show_page("sounds")
+        source = a_wav(os.path.join(tempfile.mkdtemp(), "My Bell.wav"), 0.5)
+        self.assertTrue(self.app.adopt_sound("waiting", source))
+        self.assertEqual(os.listdir(os.path.join(self.state, "sounds")), ["My Bell.wav"])
+        self.assertEqual(saved(self.app)["sounds"], {"waiting": "My Bell.wav"})
+        self.assertEqual(self.played, [("My Bell.wav", 60, True)])
+        self.assertEqual(self.app.sound_words("waiting")[0], "My Bell.wav")
+        default = self.row(sw.Button, "waiting")
+        self.assertTrue(default.enabled)
+        click(self.app, default)
+        self.assertNotIn("sounds", saved(self.app))
+        self.assertFalse(default.enabled)
+
+    def test_the_same_file_again_is_not_copied_twice_and_another_is_numbered(self):
+        folder = tempfile.mkdtemp()
+        first = a_wav(os.path.join(folder, "bell.wav"), 0.5)
+        self.assertTrue(self.app.adopt_sound("done", first))
+        self.assertTrue(self.app.adopt_sound("beam", first))
+        other = a_wav(os.path.join(tempfile.mkdtemp(), "bell.wav"), 0.7)
+        self.assertTrue(self.app.adopt_sound("error", other))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.state, "sounds"))), ["bell-2.wav", "bell.wav"])
+        self.assertEqual(saved(self.app)["sounds"], {"done": "bell.wav", "beam": "bell.wav", "error": "bell-2.wav"})
+        # One already in the folder is taken where it is.
+        self.assertTrue(self.app.adopt_sound("magic", os.path.join(self.state, "sounds", "bell-2.wav")))
+        self.assertEqual(len(os.listdir(os.path.join(self.state, "sounds"))), 2)
+
+    def test_too_long_or_not_a_sound_is_refused(self):
+        long = a_wav(os.path.join(tempfile.mkdtemp(), "song.wav"), 9)
+        self.assertFalse(self.app.adopt_sound("done", long))
+        self.assertIn("up to 8 s", self.app.problem)
+        text = os.path.join(tempfile.mkdtemp(), "notes.mp3")
+        with open(text, "w") as f:
+            f.write("not a sound")
+        self.assertFalse(self.app.adopt_sound("done", text))
+        self.assertIn("does not play", self.app.problem)
+        self.assertFalse(os.path.exists(self.app.path))  # nothing saved
+        self.assertEqual(self.played, [])
+
+    def test_a_missing_file_says_hers_plays(self):
+        cfg.save(self.app.path, sounds={**cfg.SOUNDS, "beam": "gone.wav", "magic": True})
+        self.app.poll()
+        self.assertEqual(self.app.sound_words("beam")[0], "gone.wav is missing: hers plays")
+        self.assertEqual(self.app.sound_words("magic")[0], "Miku's own")
+        self.assertEqual(self.app.sound_words("intro")[0], "None")
+
+    def test_names_a_folder_could_not_hold_are_made_safe(self):
+        self.assertEqual(sw.safe_name("C:/x/a:b*c.MP3"), "a_b_c.mp3")
+        self.assertEqual(sw.safe_name("C:/x/" + "y" * 200 + ".wav"), "y" * 100 + ".wav")
+        self.assertTrue(cfg.SOUND_FILE.match(sw.safe_name('C:/x/<"?>.wav')))
+
+    def test_the_waiting_slider(self):
+        self.app.show_page("sounds")
+        slider = next(w for w in self.app.widgets if isinstance(w, sw.Slider) and "waitingAfter" in w.keys)
+        x, y, w, h = slider.box
+        click(self.app, slider, x + 11)
+        self.assertEqual(saved(self.app), {"waitingAfter": 10})
+
+
 class Character(unittest.TestCase):
     """The character card: a tile per character, a pick for the session."""
 
@@ -318,6 +457,11 @@ class Updates(unittest.TestCase):
         self.assertEqual(self.app.release_lines(), ("Updated!", "Type /reload-plugins to meet her new version."))
         self.assertFalse(self.offer().enabled)
 
+    def test_a_version_installed_meanwhile_asks_for_a_reload_not_an_update(self):
+        self.session({"version": "0.18.0", "route": "marketplace", "latest": "0.19.0", "installed": "0.19.0"})
+        self.assertEqual(self.app.release_lines(), ("v0.19.0 is installed", "Type /reload-plugins in her session to meet her."))
+        self.assertEqual(self.app.release_offer(), "")
+
     def test_a_failed_update_can_be_tried_again(self):
         self.session({"version": "0.15.0", "route": "clone", "state": "failed", "message": "fatal: no"})
         self.assertEqual(self.app.release_lines(), ("The update failed", "fatal: no"))
@@ -340,14 +484,14 @@ class Updates(unittest.TestCase):
         self.assertIsNone(sw.headline([]))
 
     def test_every_versions_news_is_a_page_of_its_own(self):
-        self.session({"version": "0.17.0", "route": "clone", "from": "0.16.1"})
+        self.session({"version": "0.18.0", "route": "clone", "from": "0.16.1"})
         size = self.app.image().size
         click(self.app, next(w for w in self.app.widgets if isinstance(w, sw.Link) and w.words.startswith("What's new")))
         self.assertEqual(self.app.page, "news")
         self.assertEqual(self.app.image().size, size)  # the window keeps its size
         log = next(w for w in self.app.widgets if isinstance(w, sw.Changelog))
         self.assertEqual(log.since, "0.16.1")
-        self.assertEqual(log.news[0].version, "0.17.0")  # newest first, from her own whatsnew.json
+        self.assertEqual(log.news[0].version, "0.18.0")  # newest first, from her own whatsnew.json
         self.assertGreater(log.most(), 0)  # more than fits: it scrolls
         log.wheel(-1)
         self.assertEqual(log.offset, round(sw.SCROLL_STEP * self.app.u))
@@ -414,6 +558,48 @@ class OneWindow(unittest.TestCase):
             holder.wait()
         with open(os.path.join(state, sw.LOCK_FILE), encoding="utf-8") as f:
             self.assertEqual(json.load(f), {"pid": os.getpid(), "session": "b"})
+
+
+class Notifications(unittest.TestCase):
+    """The notifications page: her call, prompts from elsewhere, her away note."""
+
+    def setUp(self):
+        self.state = tempfile.mkdtemp()
+        self.app = sw.App(self.state, MIKU, show=False, scale=1.0)
+
+    def tearDown(self):
+        self.app.root.destroy()
+
+    def switch(self, key):
+        return next(w for w in self.app.widgets if isinstance(w, sw.Toggle) and w.keys == {key})
+
+    def test_it_is_a_page_of_its_own_from_the_magic_card(self):
+        size = self.app.image().size
+        click(self.app, next(w for w in self.app.widgets if isinstance(w, sw.Button) and w.words == "Notifications…"))
+        self.assertEqual(self.app.page, "notify")
+        self.assertEqual(self.app.image().size, size)
+        self.app.on_escape()
+        self.assertEqual(self.app.page, "settings")
+
+    def test_each_is_off_until_turned_on(self):
+        self.app.show_page("notify")
+        for key in ("nudge", "remote", "away"):
+            self.assertFalse(getattr(self.app.prefs, key))
+            click(self.app, self.switch(key))
+        self.assertEqual(saved(self.app), {"nudge": True, "remote": True, "away": True})
+        click(self.app, self.switch("remote"))
+        self.assertEqual(saved(self.app), {"nudge": True, "away": True})
+
+    def test_the_call_says_how_long_she_waits(self):
+        self.app.show_page("notify")
+        self.app.change(waitingAfter=45)
+        words = [w.words() for w in self.app.widgets if isinstance(w, sw.Label) and "nudge" in w.keys]
+        self.assertTrue(any("45 s" in line for line in words), words)
+
+    def test_her_messenger_is_pictured_in_her_style(self):
+        pictures = sw.messenger_sprites(MIKU, 420)
+        self.assertEqual(set(pictures), {"messenger", "away_note"})
+        self.assertEqual(sw.messenger_sprites(os.path.join(self.state, "nobody"), 420), {})
 
 
 if __name__ == "__main__":

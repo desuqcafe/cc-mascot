@@ -890,6 +890,7 @@ test("/mascot size, calm, smooth, aura and beam change every mascot's settings",
   expect((await mascot($, 'calm maybe')).text).toBe('Calm takes on or off.')
   expect((await mascot($, 'smooth')).text).toContain('Smooth sparkles off: her sparkles move in step')
   expect((await mascot($, 'smooth on')).text).toContain('Smooth sparkles on: her sparkles move as smoothly as her symbols')
+  expect((await mascot($, 'smooth')).text).toContain('(calm mode is on, so she has no sparkles to smooth)')
   expect((await mascot($, 'smooth please')).text).toBe('Smooth takes on or off.')
   expect((await mascot($, 'aura 250k 1.2M 2000000')).text).toBe('Aura from 250k, 1.2M, 2M tokens of context.')
   expect((await mascot($, 'aura 400k 300k 500k')).text).toContain('Aura takes three token counts going up')
@@ -957,12 +958,12 @@ test('/mascot settings reads what was set by hand, valid values only', async ($,
 // and the commands an update runs, which answer `run`.
 const release = (
   on: On,
-  version: string,
+  version: string | (() => string),
   run: (argv: readonly string[]) => { exitCode: number; stdout?: string; stderr?: string } = () => ({ exitCode: 0 }),
   notes: Record<string, unknown> = { '0.15.0': ['Updates, in her colors.', 'A banner.'], '0.14.1': ['Older news.'] },
 ) => {
   const disk = sessionFiles(on, undefined, path => {
-    if (/[\\/]\.claude-plugin[\\/]plugin\.json$/.test(path)) return JSON.stringify({ name: 'mascot', version })
+    if (/[\\/]\.claude-plugin[\\/]plugin\.json$/.test(path)) return JSON.stringify({ name: 'mascot', version: typeof version === 'string' ? version : version() })
     if (/[\\/]whatsnew\.json$/.test(path)) return JSON.stringify(notes)
     return undefined
   })
@@ -1160,4 +1161,170 @@ test('a copy installed by hand says how to update it', async ($, on) => {
   await start($)
   expect((await mascot($, 'update')).text).toContain('update it by hand')
   expect(runs).toEqual([])
+})
+
+test('an update run from another session is told here, and asks for a reload, not "the latest"', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  let onDisk = '0.15.0'
+  const { disk, toasts } = release(on, () => onDisk, () => ({ exitCode: 0, stdout: 'Already up to date.' }))
+  store(on)
+  overlayProcess(on)
+  on('fs.exists', (_$, e) => ({ value: /[\\/]\.git$/.test(e.path) }))
+
+  await start($)
+  await clock.advance(30_000)
+  expect(disk.last()!.update!.installed).toBeUndefined()
+  expect(toasts).toEqual([])
+
+  onDisk = '0.16.0' // another session pulled the new version
+  await clock.advance(30_000)
+  expect(toasts).toEqual(['Mascot v0.16.0 is installed: type /reload-plugins to meet her (this session runs v0.15.0).'])
+  expect(disk.last()!.update!.installed).toBe('0.16.0')
+  expect(disk.last()!.info!.installed).toBe('0.16.0')
+  await clock.advance(30_000)
+  expect(toasts.length).toBe(1) // once
+
+  await mascot($, 'update')
+  await clock.advance(10)
+  expect(toasts.pop()).toBe('Mascot v0.16.0 is installed: type /reload-plugins to meet her. This session still runs v0.15.0.')
+  expect(disk.last()!.update).toMatchObject({ state: 'updated', installed: '0.16.0' })
+})
+
+// ---- remote
+
+test('a prompt from Remote Control or a channel is written for the overlay; a typed one is not', async ($, on) => {
+  mock.clock(on, { now: 7_000 })
+  const disk = sessionFiles(on)
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+
+  await $.prompt.submit({ text: 'typed', wait: false, origin: { kind: 'composer' } })
+  expect(disk.last()?.visit).toBeUndefined()
+  await $.prompt.submit({ text: 'from my phone', wait: false, origin: { kind: 'bridge' } })
+  expect(disk.last()!.visit).toEqual({ at: 7_000, from: 'bridge' })
+  await $.prompt.submit({ text: 'from a chat', wait: false, origin: { kind: 'channel', server: 'telegram' } })
+  expect(disk.last()!.visit).toEqual({ at: 7_000, from: 'channel', name: 'telegram' })
+})
+
+test('/mascot call, remote and away turn each on or off; all off by default', async ($, on) => {
+  mock.clock(on)
+  const disk = sessionFiles(on)
+  overlayProcess(on)
+
+  expect((await mascot($, 'call')).text).toBe('Call me off. /mascot call on|off.')
+  expect((await mascot($, 'call on')).text).toContain('Call me on: after 30 s of waiting on you')
+  expect((await mascot($, 'remote on')).text).toBe('Remote on: she shows prompts sent from your phone, the web or a chat.')
+  expect((await mascot($, 'away on')).text).toBe('Away notes on: back at your PC, she holds a note of what happened.')
+  expect(disk.settings()).toEqual({ nudge: true, remote: true, away: true })
+  expect((await mascot($, 'away maybe')).text).toBe('Away takes on or off.')
+  await mascot($, 'remote off')
+  expect(disk.settings()).toEqual({ nudge: true, away: true })
+  await mascot($, 'reset')
+  expect(disk.settings()).toEqual({})
+  expect((await mascot($, 'constructor')).text).toContain('Usage: /mascot')
+})
+
+// ---- sounds
+
+test('the end of a round, the beam and a turn that died cue their sounds', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on)
+  turnBottoms(on)
+  on('classic.StopFailure', () => ({}))
+
+  await $.turn.start({ text: 'quick', turnId: 't1' })
+  await $.turn.complete(ended('t1'))
+  expect(disk.last()!.cue).toEqual({ at: 1_000, moment: 'done' })
+  await clock.advance(3_000)
+
+  await $.turn.start({ text: 'slow', turnId: 't2' })
+  await clock.advance(120_000)
+  await $.turn.complete(ended('t2'))
+  expect(disk.last()!.cue).toEqual({ at: 124_000, moment: 'beam' })
+  await clock.advance(3_600)
+
+  // A turn that dies is said twice (turn.complete, StopFailure): one sound.
+  await $.turn.start({ text: 'hi', turnId: 't3' })
+  await $.turn.complete({ ...ended('t3'), reason: 'error' })
+  expect(disk.last()!.cue).toEqual({ at: 127_600, moment: 'error' })
+  await clock.advance(500)
+  await $.classic.StopFailure({ error: 'overloaded' })
+  expect(disk.last()!.cue).toEqual({ at: 127_600, moment: 'error' })
+
+  // A failing tool call is not a turn that died; an interrupted one is quiet.
+  await clock.advance(5_000)
+  await $.turn.start({ text: 'again', turnId: 't4' })
+  await $.turn.complete({ ...ended('t4'), isAborted: true })
+  expect(disk.last()!.cue).toEqual({ at: 127_600, moment: 'error' })
+})
+
+test('/mascot beam cues the beam sound too', async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on)
+  overlayProcess(on)
+  await mascot($, 'beam')
+  expect(disk.last()!.cue).toEqual({ at: 1_000, moment: 'beam' })
+})
+
+test('/mascot sound turns sounds on, sets the volume, the wait and each moment', async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on, { note: 'mine' })
+  overlayProcess(on)
+  const present = ['bell.wav', 'My Chime.MP3']
+  // The path reaches the hook in the platform's spelling.
+  on('fs.exists', (_$, e) => ({ value: present.some(name => e.path.replace(/\\/g, '/').endsWith(`/sounds/${name}`)) }))
+
+  const about = (await mascot($, 'sound')).text
+  expect(about).toContain('Sound off. Volume 60%. Sounds: waiting, done, beam, error her own; magic, intro, outro none.')
+  expect(about).toContain('Her waiting sound after 30 s of waiting on you.')
+  expect(about).toMatch(/Your files go in C:\/Users\/test\/\.claude\/mascot\/sounds\./)
+
+  expect((await mascot($, 'sound on')).text).toBe('Sound on.')
+  expect((await mascot($, 'sound volume 35%')).text).toBe('Volume 35%.')
+  expect((await mascot($, 'sound volume 300')).text).toBe('Volume takes 0 to 100 (%) or default.')
+  expect((await mascot($, 'sound wait 90s')).text).toBe('Her waiting sound after 90 s of waiting on you.')
+  expect((await mascot($, 'sound wait 5')).text).toBe('Wait takes seconds (10 to 300) or default.')
+  expect((await mascot($, 'sound magic on')).text).toBe('Magic: her own sound.')
+  expect((await mascot($, 'sound done off')).text).toBe('Done: none.')
+  // A file keeps its name as typed, spaces and case; it must be in sounds/.
+  expect((await mascot($, 'sound waiting My Chime.MP3')).text).toBe('Waiting: My Chime.MP3.')
+  expect((await mascot($, 'sound beam missing.wav')).text).toContain('No missing.wav in C:/Users/test/.claude/mascot/sounds')
+  expect((await mascot($, 'sound beam ../x.wav')).text).toContain('a .wav or .mp3 file')
+  expect((await mascot($, 'sound beam x.ogg')).text).toContain('a .wav or .mp3 file')
+  // On keeps a file of yours; default is her own again.
+  expect((await mascot($, 'sound waiting on')).text).toBe('Waiting: My Chime.MP3.')
+  expect(disk.settings()).toEqual({
+    note: 'mine',
+    sound: true,
+    volume: 35,
+    waitingAfter: 90,
+    sounds: { magic: true, done: false, waiting: 'My Chime.MP3' },
+  })
+  expect((await mascot($, 'sound waiting default')).text).toBe('Waiting: her own sound.')
+  expect((await mascot($, 'sound done on')).text).toBe('Done: her own sound.')
+  expect(disk.settings()!.sounds).toEqual({ magic: true })
+  expect((await mascot($, 'sound boom')).text).toContain('Moments: waiting, done, beam, error, magic, intro, outro.')
+
+  await mascot($, 'sound off')
+  expect((await mascot($, 'sound intro on')).text).toBe('Intro: her own sound. (Sound is off: /mascot sound on.)')
+
+  expect((await mascot($, 'reset')).text).toContain('Settings back to their defaults.')
+  expect(disk.settings()).toEqual({ note: 'mine' })
+})
+
+test('/mascot sound try plays a moment now, whatever the settings say', async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  const disk = sessionFiles(on)
+  overlayProcess(on)
+  expect((await mascot($, 'sound try outro')).text).toBe('Playing her outro sound.')
+  expect(disk.last()!.cue).toEqual({ at: 1_000, moment: 'outro', test: true })
+  expect((await mascot($, 'sound try')).text).toContain('Try which?')
+})
+
+test('the settings file by hand: each moment checked on its own', async ($, on) => {
+  mock.clock(on)
+  sessionFiles(on, { sound: 'yes', volume: 101, sounds: { beam: false, done: 'C:/x.wav', magic: 'a b.mp3', boom: true } })
+  overlayProcess(on)
+  const text = (await mascot($, 'sound')).text
+  expect(text).toContain('Sound off. Volume 60%.')
+  expect(text).toContain('Sounds: waiting, done, error her own; magic: a b.mp3; beam, intro, outro none.')
 })

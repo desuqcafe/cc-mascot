@@ -29,12 +29,17 @@ def raw(path):
 class Load(unittest.TestCase):
     def test_no_file_is_todays_behaviour(self):
         self.assertEqual(cfg.load(a_file()), cfg.DEFAULTS)
-        self.assertEqual(cfg.DEFAULTS, (420, False, False, (300_000, 400_000, 500_000), 2, True, False, False))
+        self.assertEqual(cfg.DEFAULTS, (420, False, False, (300_000, 400_000, 500_000), 2, True, False, False,
+                                        False, 60, cfg.SOUNDS, 30, False, False, False))
 
     def test_it_reads_what_was_set(self):
         path = a_file({"size": 560, "calm": True, "smooth": True, "aura": [200_000, 250_000, 900_000], "beamAfter": 10,
-                       "beamForAgents": False, "magicAfter": 3, "checkUpdates": True})
-        self.assertEqual(cfg.load(path), (560, True, True, (200_000, 250_000, 900_000), 10, False, 3, True))
+                       "beamForAgents": False, "magicAfter": 3, "checkUpdates": True, "sound": True, "volume": 35,
+                       "sounds": {"magic": True, "done": "ding.mp3"}, "waitingAfter": 90,
+                       "nudge": True, "remote": True, "away": True})
+        self.assertEqual(cfg.load(path), (560, True, True, (200_000, 250_000, 900_000), 10, False, 3, True, True, 35,
+                                          {**cfg.SOUNDS, "magic": True, "done": "ding.mp3"}, 90, True, True, True))
+        self.assertEqual(cfg.load(a_file({"nudge": 1, "remote": "on", "away": None}))[-3:], (False, False, False))
         self.assertEqual(cfg.load(a_file({"checkUpdates": "yes"})).checkUpdates, False)
         self.assertEqual(cfg.load(a_file({"aura": False, "beamAfter": False})).aura, False)
         self.assertEqual(cfg.load(a_file({"aura": False, "beamAfter": False})).beamAfter, False)
@@ -61,6 +66,44 @@ class Load(unittest.TestCase):
     def test_numbers_are_whole(self):
         self.assertEqual(cfg.check("size", 333.6), 334)
         self.assertEqual(cfg.check("aura", [300_000.4, 400_000, 500_000]), (300_000, 400_000, 500_000))
+
+
+class Sounds(unittest.TestCase):
+    def test_each_moment_is_checked_on_its_own(self):
+        sounds = cfg.check("sounds", {"waiting": False, "beam": "../evil.wav", "error": "C:\\x.wav", "magic": "a.ogg",
+                                      "intro": "Bell Tower.MP3", "outro": 1, "nope": True})
+        self.assertEqual(sounds, {**cfg.SOUNDS, "waiting": False, "intro": "Bell Tower.MP3"})
+        for value in ([], "on", None, True):
+            self.assertIsNone(cfg.check("sounds", value), value)
+        self.assertEqual(cfg.load(a_file({"sounds": "loud"})).sounds, cfg.SOUNDS)
+
+    def test_a_name_is_a_bare_wav_or_mp3(self):
+        for name in ("chime.wav", "ベル.mp3", "my bell (2).WAV"):
+            self.assertEqual(cfg.sound_choice(name), name)
+        for name in ("a/b.wav", "a\\b.wav", "c:x.wav", ".wav", "x.wav ", " x.wav", "x.ogg", "x" * 121 + ".wav", "x\n.wav"):
+            self.assertIsNone(cfg.sound_choice(name), name)
+
+    def test_volume_and_waiting(self):
+        self.assertEqual(cfg.check("volume", 0), 0)
+        self.assertEqual(cfg.check("volume", 99.6), 100)
+        self.assertEqual(cfg.check("waitingAfter", 10), 10)
+        for key, value in (("volume", 101), ("volume", True), ("waitingAfter", 9), ("waitingAfter", 301)):
+            self.assertIsNone(cfg.check(key, value), (key, value))
+
+    def test_the_file_keeps_only_the_moments_changed(self):
+        path = a_file()
+        cfg.save(path, sound=True, sounds={**cfg.SOUNDS, "waiting": "me.wav", "magic": True})
+        self.assertEqual(raw(path), {"sound": True, "sounds": {"waiting": "me.wav", "magic": True}})
+        cfg.save(path, sounds={**cfg.SOUNDS, "magic": True})
+        self.assertEqual(raw(path)["sounds"], {"magic": True})
+        cfg.save(path, sounds=dict(cfg.SOUNDS))
+        self.assertEqual(raw(path), {"sound": True})
+
+    def test_a_loaded_default_is_its_own(self):
+        prefs = cfg.load(a_file())
+        prefs.sounds["done"] = False
+        self.assertIs(cfg.DEFAULTS.sounds["done"], True)
+        self.assertIs(cfg.SOUNDS["done"], True)
 
 
 class Save(unittest.TestCase):

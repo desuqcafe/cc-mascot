@@ -45,8 +45,29 @@ export type MascotSessionFile = {
   character?: string
   update?: MascotUpdate
   call?: MascotCall
+  cue?: MascotCue
+  visit?: MascotVisit
   ended?: true
 }
+
+/**
+ * A prompt that came from elsewhere (`at`, epoch ms): `from` 'bridge' (Remote
+ * Control: the Claude app on a phone, or the web) or 'channel' (a chat an MCP
+ * server relays, `name` its server). With the `remote` setting on, the
+ * overlay shows her messenger bringing it in, once per new `at`.
+ */
+export type MascotVisit = { at: number; from: 'bridge' | 'channel'; name?: string }
+
+/** The moments she has a sound for (the `sounds` setting). */
+export type MascotMoment = 'waiting' | 'done' | 'beam' | 'error' | 'magic' | 'intro' | 'outro'
+
+/**
+ * A moment only the mod knows (`at`, epoch ms): a round done or ending in
+ * the beam, a turn that died. The overlay plays its sound once per new
+ * `at`, as the settings say; `test` (/mascot sound try) plays it whatever
+ * they say. The overlay finds the other moments itself.
+ */
+export type MascotCue = { at: number; moment: MascotMoment; test?: true }
 
 /**
  * Her call to the pointer: a round of work ended (`at`, epoch ms) that
@@ -65,7 +86,9 @@ export type MascotCall = { at: number; test?: true }
  * newer version than the last one run first loaded: the overlay plays its
  * banner once, while that is fresh; `from` the version before the last
  * update (`$.store` `upgrade`, in every session while `version` runs): the
- * settings window's news counts from it.
+ * settings window's news counts from it; `installed` a newer version
+ * installed since this session loaded (an update run from another
+ * session): this one meets it with /reload-plugins.
  */
 export type MascotUpdate = {
   version: string
@@ -75,6 +98,7 @@ export type MascotUpdate = {
   message?: string
   celebrate?: number
   from?: string
+  installed?: string
 }
 
 /**
@@ -89,7 +113,17 @@ export type MascotUpdate = {
  * `beamForAgents` a round that used agents ends in it too (true);
  * `magicAfter` the minutes a round of work lasts before its end sends magic
  * to the pointer (0-120: 0 every round), or
- * false for never (false); `checkUpdates` look for a newer release on GitHub once a day (false).
+ * false for never (false); `checkUpdates` look for a newer release on GitHub once a day (false);
+ * `sound` she plays sounds (false); `volume` theirs, 0-100 (60); `sounds`
+ * per moment, false none, true her own or the name of a file of yours in
+ * the mascot folder's sounds/ (.wav or .mp3), a moment left out its default
+ * (waiting, done, beam and error her own, the rest none); `waitingAfter`
+ * the seconds she waits on you before her waiting sound (10-300, 30);
+ * `nudge` once she has waited that long, her messenger calls and her
+ * terminal's taskbar button flashes, and a click on her brings her
+ * terminal forward (false); `remote` her messenger brings in a prompt from
+ * Remote Control or a channel (false); `away` what happened while you were away, on a note
+ * she holds when you are back (false).
  */
 export type MascotSettings = {
   size?: number
@@ -100,6 +134,13 @@ export type MascotSettings = {
   beamForAgents?: boolean
   magicAfter?: number | false
   checkUpdates?: boolean
+  sound?: boolean
+  volume?: number
+  sounds?: Partial<Record<MascotMoment, boolean | string>>
+  waitingAfter?: number
+  nudge?: boolean
+  remote?: boolean
+  away?: boolean
 }
 
 declare module 'claude-code' {
@@ -107,8 +148,17 @@ declare module 'claude-code' {
     /**
      * `view`: this session's show or hide (`at` 0 until chosen); `sessionKey`:
      * the name of its file; `character`: a character picked for this session
-     * alone ('' for none: the project's). All outlive a reload of the mod.
+     * alone ('' for none: the project's); `ran`: the version this
+     * conversation ran last ('' for none: a new session, or after a /clear).
+     * All outlive a reload of the mod.
      */
-    mascot: { mood: MascotMood; work: MascotWork; view: MascotVisibility; sessionKey: string; character: string }
+    mascot: {
+      mood: MascotMood
+      work: MascotWork
+      view: MascotVisibility
+      sessionKey: string
+      character: string
+      ran: string
+    }
   }
 }

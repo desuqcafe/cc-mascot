@@ -1,4 +1,30 @@
 {
+  "0.19.0": [
+    "She can tell you more, each off until you turn it on in the settings window's Notifications page: her messenger calls and her terminal blinks in the taskbar when she has waited on you, and a click on her brings her terminal forward.",
+    "Prompts you send from the Claude app on your phone, the web or a chat come in with her messenger.",
+    "Away notes: back at your PC, she holds a note of what happened while you were away. Hover her to read it.",
+    "Miku's messenger is a little phone; Yunseul's a bat carrying a letter sealed in crimson wax.",
+    {
+      "text": "An update run in one session now tells your other sessions it is installed, instead of one saying it was already the latest. Each greets the new version with her banner once you reload it.",
+      "kind": "fix"
+    },
+    {
+      "text": "A session no longer ends up with two mascots after a plugin reload: if the old one is left running, she steps aside for the new one.",
+      "kind": "fix"
+    }
+  ],
+  "0.18.0": [
+    "Sounds, off until you turn them on: a chime when she has waited on you, a cheer when work is done, her big finish, a soft \"uh-oh\" when a turn fails, and more. Miku and Yunseul each have their own, made just for them.",
+    "Any moment can play a sound of yours: Choose sounds in /mascot settings, or /mascot sound. Your files are kept in your mascot folder, where updates never touch them.",
+    {
+      "text": "Calm mode and smooth sparkles now share an Effects card in the settings window, each with a line saying what it does, and smooth sparkles says why it is greyed out in calm mode.",
+      "kind": "fix"
+    },
+    {
+      "text": "The \"…\" in the settings window sits on the line again instead of floating in the middle.",
+      "kind": "fix"
+    }
+  ],
   "0.17.0": [
     "What's new, all of it: after an update she tells you what you missed since your version, not only the newest line. /mascot news lists it, and so does \"What's new in every version\" in /mascot settings.",
     {

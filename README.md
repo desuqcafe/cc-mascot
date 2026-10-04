@@ -99,11 +99,40 @@ grows (with an estimate of the turns left before auto-compact), your 5-hour
 and weekly limits, the model, what Claude is doing and for how long, and each
 subagent's context.
 
+### Sounds, if you like
+
+Off until you turn them on (`/mascot sound on`, or the settings window).
+Then she chimes once she has waited on you for 30 seconds, cheers when the
+work is done, plays a fanfare for her beam and a soft "uh-oh" when a turn
+fails. Cursor magic and her coming and going can have a sound too. Miku's
+are bright glass and synth sparkles; Yunseul's a music box, low bells and
+an organ. Every sound is original, made in code for this plugin. Any moment
+can play a sound of your own instead (a `.wav` or `.mp3`, up to 8
+seconds). She is quiet while hidden or while your screen is off or locked,
+and two mascots never talk over each other.
+
+### She lets you know
+
+Three more ways she tells you what is going on, each off until you turn it
+on in the settings window's Notifications page, and each in her own style:
+Miku's messenger is a little phone, Yunseul's a bat carrying a letter
+sealed in crimson wax.
+
+- **Call me**: when she has waited on you for 30 seconds, her messenger
+  calls and her terminal blinks in the taskbar. Click her to bring her
+  terminal forward.
+- **Remote Control**: a prompt you send from the Claude app on your phone,
+  the web or a chat comes in with her messenger.
+- **Away notes**: step away, and she keeps a note of what happened (work
+  done, a turn that failed, waiting on you). When you are back, she holds
+  it at her feet; hover her to read it.
+
 ### Playing with her
 
 - **Drag** her anywhere, on any display. She goes shy, legs dangling, swings
   from where you hold her and lands with a little bounce. Each spot
   remembers where you put her.
+- **Click** her to bring her terminal forward (with Call me on).
 - **Double-click** sends her back to her spot.
 - **Right-click** hides her.
 - Several sessions stand side by side, never on top of each other, each with
@@ -244,11 +273,15 @@ clone); type `/reload-plugins` afterwards to meet her new version.
 | `/mascot updates [on\|off]` | Look for a new version once a day (off by default). |
 | `/mascot update` | Update her to the newest version. |
 | `/mascot news [all]` | What is new since the version you had before (`all`: every version). |
+| `/mascot sound [on\|off]` | Her sounds (off by default); with no value, what each moment plays. |
+| `/mascot sound volume [0-100]` | Their volume (60). |
+| `/mascot sound MOMENT [on\|off\|default\|FILE]` | What a moment plays (`waiting`, `done`, `beam`, `error`, `magic`, `intro`, `outro`): her own, nothing, or your file in `~/.claude/mascot/sounds/`. |
+| `/mascot sound try MOMENT` | Hear a moment's sound now. |
 | `/mascot reset` | Every setting back to its default. |
 
 ## Settings
 
-<img src="docs/media/settings.png" alt="The settings window in Miku's teal and pink: her character, size with a preview of her, calm mode, the aura's thresholds, the beam, cursor magic and updates" width="400"> <img src="docs/media/yunseul/settings.png" alt="The same window in Yunseul's crimson and lilac, with her picked" width="400">
+<img src="docs/media/settings.png" alt="The settings window in Miku's teal and pink: her character, size with a preview of her, calm mode, the aura's thresholds, the beam, cursor magic, sound and updates" width="400"> <img src="docs/media/yunseul/settings.png" alt="The same window in Yunseul's crimson and lilac, with her picked" width="400">
 
 The window picks her character too: click a character to switch this
 session's mascot. With "Remember for this project" on (the default), the
@@ -287,10 +320,7 @@ mascot at once, live, from the window, the commands above, or
 
 Plans, not promises:
 
-- **Sound, off by default**: a soft chime when she has been waiting on you
-  for a while, and a little something for the beam.
-- **Optional extras**: click her to bring her session's terminal forward;
-  hide her while a fullscreen app is on her display.
+- **Optional extras**: hide her while a fullscreen app is on her display.
 - **More characters**, each with their own moods, colors and effects.
 
 ## License and credits

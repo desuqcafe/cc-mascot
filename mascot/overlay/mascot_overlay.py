@@ -20,6 +20,8 @@ overlay shares:
     all.json              a show or hide for every session (/mascot show all)
     settings.json         her size, calm mode, the aura's thresholds...
                           (settings.py; followed live)
+    sounds/               sound files of yours, picked per moment (sound.py)
+    sound-gate.json       until when a mascot's sound plays: theirs never overlap
     slots/<n>.lock        which overlay stands in spot n: {pid, parent, key}
     slots/<n>.pos.json    where spot n's mascot was dragged to
 
@@ -50,11 +52,29 @@ that clicks pass through; hidden, she sends it all the same. While the
 screen is dark or the PC locked (presence.py), she rests: nothing drawn,
 her art kept, her call held until you are back.
 
+She can tell you more (settings.py, each off by default): with `nudge`,
+once she has waited on you `waitingAfter` seconds her messenger calls and
+her terminal's taskbar button flashes (terminal.py), and a click on her
+brings her terminal forward; with `remote`, her messenger brings in a
+prompt sent from Remote Control or a chat (the session file's `visit`);
+with `away`, what happened while you were away waits on a note at her feet
+until her card has shown it to you (away.py).
+
+With sound on (settings.py, off by default) she plays a sound for each
+moment that has one (sound.py): her waiting sound once she has waited on
+you `waitingAfter` seconds, coming and going with her intro and outro,
+her call as it goes; the end of a round (done or the beam) and a turn
+that died (error) when the mod says so (the session file's `cue`). Hidden,
+or while the screen is dark or locked, she is quiet, and nothing she
+missed plays later.
+
 The overlay runs while its session does, shown or hidden, and says on stdout
 what was chosen in its window (`hidden`). Its art is loaded only while it is
 shown. It cleans up and exits when the mod writes `ended` or when its Claude
 Code is gone, and quits when the mod that started it is unloaded (a reload
-starts the next one); any overlay sweeps up after crashed ones. Claude Code,
+starts the next one), or when a newer overlay of its Claude Code took its
+session (a reload that did not stop it); any overlay sweeps up after
+crashed ones. Claude Code,
 exiting, kills the process tree it started, so the overlay runs apart from it
 (`stand_apart`): that way she still plays the outro when its terminal is
 closed.
@@ -81,8 +101,11 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont
 import effects as fx
 import magic
 import settings as cfg
+import sound
+from away import Away, idle_s
 from layered import LayeredWindow
 from presence import Presence
+from terminal import Terminal
 
 MOODS = ("idle", "thinking", "working", "happy", "error", "waiting", "worried", "sleepy", "beam")
 # Art the overlay plays on its own, not a mood the mod writes: "held" while
@@ -129,6 +152,7 @@ SCREENS_EVERY_MS = 2000
 # How often a shown mascot makes sure no ordinary window has got above her
 # (LayeredWindow.keep_on_top): a walk up the windows above hers.
 ON_TOP_EVERY_MS = 1000
+AWAY_EVERY_MS = 1000  # whether you are away (the `away` setting)
 # settings.json is checked with the session file (every POLL_MS): a size
 # picked in the settings window shows at once. A stat costs microseconds.
 POLL_MS = 100
@@ -406,8 +430,8 @@ def tag_image(text, size):
 Playing = namedtuple("Playing", "kind since then calm")
 Playing.__new__.__defaults__ = (False,)
 
-SessionState = namedtuple("SessionState", "mood info choice ended cleared character celebrate call")
-SessionState.__new__.__defaults__ = (0, None, None, None)
+SessionState = namedtuple("SessionState", "mood info choice ended cleared character celebrate call cue visit")
+SessionState.__new__.__defaults__ = (0, None, None, None, None, None)
 
 # A new version's banner is played when the mod's word of it (`celebrate`,
 # epoch ms) is this fresh; an overlay started later, by a reload, lets it be.
@@ -433,6 +457,30 @@ def call_of(data):
     if isinstance(at, (int, float)) and not isinstance(at, bool):
         return at, call.get("test") is True
     return None
+
+
+def cue_of(data):
+    """(when, moment, whether a test) of the last sound the session file's
+    `cue` asks for (sound.py); None for none."""
+    cue = data.get("cue") if isinstance(data.get("cue"), dict) else {}
+    at, moment = cue.get("at"), cue.get("moment")
+    if isinstance(at, (int, float)) and not isinstance(at, bool) and moment in cfg.MOMENTS:
+        return at, moment, cue.get("test") is True
+    return None
+
+
+# What a prompt from elsewhere is called on her away note.
+VISIT_FROM = {"bridge": "Remote Control"}
+
+
+def visit_of(data):
+    """(when, where from) of the last prompt sent from elsewhere (the session
+    file's `visit`): Remote Control, or a channel by its name; None for none."""
+    visit = data.get("visit") if isinstance(data.get("visit"), dict) else {}
+    at, kind, name = visit.get("at"), visit.get("from"), visit.get("name")
+    if not isinstance(at, (int, float)) or isinstance(at, bool) or kind not in ("bridge", "channel"):
+        return None
+    return at, (name if kind == "channel" and isinstance(name, str) and name.strip() else VISIT_FROM.get(kind, "a chat"))
 
 
 def read_json(path):
@@ -483,6 +531,8 @@ def read_state(path=None):
         data["character"] if isinstance(data.get("character"), str) and re.fullmatch(r"[A-Za-z0-9_-]+", data["character"]) else None,
         celebrate_of(data),
         call_of(data),
+        cue_of(data),
+        visit_of(data),
     )
 
 
@@ -676,8 +726,10 @@ def card_lines(mood, info, now_ms):
         parts = [plural(n, kind.replace("_", " ")) for kind, n in sorted(background.items())]
         lines.append("Background: " + ", ".join(parts))
 
-    new = info.get("newVersion")
-    if isinstance(new, str) and re.fullmatch(r"\d+(\.\d+){1,3}", new):
+    installed, new = info.get("installed"), info.get("newVersion")
+    if isinstance(installed, str) and re.fullmatch(r"\d+(\.\d+){1,3}", installed):
+        lines.append(f"v{installed} installed \u00b7 /reload-plugins")
+    elif isinstance(new, str) and re.fullmatch(r"\d+(\.\d+){1,3}", new):
         lines.append(f"v{new} is out \u00b7 /mascot update")
 
     if info.get("sessionId"):
@@ -853,6 +905,36 @@ def slot_path(n):
 
 def pos_path(n):
     return os.path.join(SLOTS_DIR, f"{n}.pos.json")
+
+
+def owner_path():
+    """Which overlay is this session's: the newest to start. A lock, so the
+    sweep clears it once its overlay is gone."""
+    return os.path.join(SLOTS_DIR, f"session-{SESSION_KEY}.lock")
+
+
+def claim_session(parent):
+    """Says this overlay is the session's, at its start."""
+    os.makedirs(SLOTS_DIR, exist_ok=True)
+    write_json(owner_path(), {"pid": os.getpid(), "parent": parent, "key": SESSION_KEY})
+
+
+def is_replaced(parent):
+    """Whether a newer overlay of our own Claude Code took this session: a
+    reload whose stop never reached this one (seen live: the old spawn
+    outlived a reload, and two mascots stood for one session)."""
+    holder = read_json(owner_path())
+    return (
+        isinstance(holder, dict)
+        and holder.get("pid") != os.getpid()
+        and holder.get("parent") == parent
+        and is_alive(holder.get("pid"))
+    )
+
+
+def release_session():
+    if (read_json(owner_path()) or {}).get("pid") == os.getpid():
+        remove(owner_path())
 
 
 def mtime_of(path):
@@ -1247,18 +1329,53 @@ def run_window(parent, starter):
         # waiting to go, {test, seen (monotonic s)}.
         "called": first.call[0] if first.call else 0,
         "call": None,
+        # Her sounds (sound.py): the last cue seen from the mod (epoch ms;
+        # one in the file at the start is old), and since when she has
+        # waited on you (monotonic s; None once her waiting sound is due
+        # or played).
+        "cued": first.cue[0] if first.cue else 0,
+        "waiting": None,
+        # Telling you more (nudge, remote, away): since when she has waited
+        # on you (monotonic s, while she does), since when her messenger
+        # calls (None: it does not), the last prompt from elsewhere seen
+        # (epoch ms; one in the file at the start is old) and since when
+        # her messenger brings it in, and since when her away note shows.
+        "waited": None,
+        "calling": None,
+        "visited": first.visit[0] if first.visit else 0,
+        "delivery": None,
+        "noted": None,
     }
     calls = magic.Magic(root)
     presence = Presence()
+    terminal = Terminal(parent)
+    notes = Away()
+    player = sound.Player(os.path.join(STATE_DIR, sound.GATE_FILE))
 
     def calm():
         return state["prefs"].calm
+
+    def cue(moment, test=False):
+        """Plays the moment's sound: with sound on, while she is shown and
+        someone can see her; `test` (trying it) whatever those say, her
+        own sound for a moment that has none."""
+        prefs = state["prefs"]
+        choice = prefs.sounds.get(moment, False)
+        if not test and not (prefs.sound and choice is not False and state["shown"] and not presence.dark()):
+            return
+        if moment == "done" and not test and state["call"] is not None and prefs.sounds.get("magic") is not False:
+            return  # her call follows at once, and its sound says the round is done
+
+        path = sound.resolve(choice if choice is not False else True, moment, FRAMES_DIR, STATE_DIR)
+        player.play(path, prefs.volume, sound.PRIORITY[moment], force=test)
 
     def play(kind, then=None):
         """Starts a projection; `then` runs once it is over."""
         now = time.monotonic()
         state["act"] = Playing(kind, now, then, calm())
         state["carry"] = None
+        if kind in ("intro", "outro"):
+            cue(kind)
         if kind == "intro":
             # Her symbol and the status come once she is whole.
             state["since"] = now + fx.lock_in(calm())
@@ -1333,7 +1450,7 @@ def run_window(parent, starter):
         if carry:
             glitch = max(glitch, carry.glitch(t))
         frame = her if calm() else fx.glitch(her, glitch, t)
-        draws = [] if act else fx.placements(mood, frame.width, frame.height, t, age)
+        draws = [] if act else fx.placements(mood, frame.width, frame.height, t, age) + extras(frame.width, frame.height, t)
         if carry:
             image = carry.draw(frame, look.behind, look.over, draws, sprites, state["tag"], height, t)
             state["margin"] = fx.DRAG_PAD
@@ -1357,6 +1474,21 @@ def run_window(parent, starter):
         image = fx.compose(frame, draws, sprites, state["tag"], look.behind, look.over)
         state["margin"] = 0
         window.show(image, *corner_at())
+
+    def extras(w, h, t):
+        """[Draw] of what she tells you besides her mood: her messenger
+        calling or bringing a prompt in, her away note."""
+        draws = []
+        if state["calling"] is not None:
+            draws += fx.calling(w, h, t, t - state["calling"], calm())
+        if state["delivery"] is not None:
+            if t - state["delivery"] < fx.DELIVER_S:
+                draws += fx.delivered(w, h, t, t - state["delivery"], calm())
+            else:
+                state["delivery"] = None
+        if state["noted"] is not None:
+            draws += fx.noted(w, h, t, t - state["noted"], calm())
+        return draws
 
     def animate():
         state["tick"] = None
@@ -1392,7 +1524,7 @@ def run_window(parent, starter):
             return
         status_moving = fx.status_moving(state["status"], state["status_was"], t - state["status_since"], calm())
         busy = (state["act"] is not None or state["carry"] is not None or state["celebration"] is not None
-                or fx.moving(mood, age))
+                or state["calling"] is not None or state["delivery"] is not None or fx.moving(mood, age))
         rate = tick_rate(fps, len(frames), fx.ANIMATE_FPS if busy else STATUS_FPS if status_moving else 0)
         status_fps = status_rate(rate, busy, state["prefs"].smooth and not calm())
         index = step_of(clock, fps) % len(frames)
@@ -1436,7 +1568,9 @@ def run_window(parent, starter):
     card_body = tk.Canvas(inner, bg=CARD_BG, highlightthickness=0, borderwidth=0)
     card_body.pack(anchor="w", pady=(4, 0))
     font = tkfont.Font(family=CARD_FONT[0], size=CARD_FONT[1])
-    hover = {"shown": False, "hide": None, "refresh": None}  # the after() ids of its hiding and its next redraw
+    # The after() ids of its hiding and its next redraw, and whether it has
+    # shown her away note.
+    hover = {"shown": False, "hide": None, "refresh": None, "read": False}
 
     def save_pos():
         if state["slot"] is not None:
@@ -1447,6 +1581,10 @@ def run_window(parent, starter):
         if mood != state["mood"]:
             state["mood"] = mood
             state["since"] = time.monotonic()
+            state["waiting"] = state["since"] if mood == "waiting" else None
+            state["waited"] = state["waiting"]
+            if mood == "waiting":
+                notes.saw("waiting", time.time())
             if playing("intro"):  # her symbol waits until she is whole
                 state["since"] = max(state["since"], state["act"].since + fx.lock_in(state["act"].calm))
             redraw()
@@ -1523,6 +1661,7 @@ def run_window(parent, starter):
             state["closed"] = True
             release_slot(state["slot"])
             state["slot"] = None
+            release_session()
             remove(SESSION_PATH)
             root.destroy()
 
@@ -1593,6 +1732,19 @@ def run_window(parent, starter):
                     # A round is over: her call, as she cheers.
                     state["called"] = current.call[0]
                     state["call"] = {"test": current.call[1], "seen": time.monotonic()}
+                if current.cue and current.cue[0] != state["cued"]:
+                    # The mod's word of a moment: a round done, the beam, a turn died.
+                    state["cued"] = current.cue[0]
+                    cue(current.cue[1], current.cue[2])
+                    if not current.cue[2] and current.cue[1] in ("done", "beam", "error"):
+                        notes.saw(current.cue[1], current.cue[0] / 1000)
+                if current.visit and current.visit[0] != state["visited"]:
+                    # A prompt sent from elsewhere: her messenger brings it in.
+                    state["visited"] = current.visit[0]
+                    notes.saw("visit", current.visit[0] / 1000, current.visit[1])
+                    if state["prefs"].remote and state["shown"] and state["act"] is None:
+                        state["delivery"] = time.monotonic()
+                        redraw()
                 if current.celebrate and current.celebrate[0] != state["celebrated"]:
                     # A newer version has loaded: her banner, once.
                     state["celebrated"] = current.celebrate[0]
@@ -1610,8 +1762,51 @@ def run_window(parent, starter):
                 leave(hide)
         follow_character()
         answer_call()
+        chime()
+        nudge()
         if not state["ending"]:
             root.after(POLL_MS, poll)
+
+    def chime():
+        """Her waiting sound, once, when she has waited on you long enough;
+        missed (hidden, nobody there), it is not played later."""
+        since = state["waiting"]
+        if since is not None and time.monotonic() - since >= state["prefs"].waitingAfter:
+            state["waiting"] = None
+            cue("waiting")
+
+    def nudge():
+        """Her messenger's call, once she has waited on you `waitingAfter`
+        seconds: it calls while she waits and is shown, and her terminal's
+        taskbar button flashes until it comes to the front (the screen dark
+        too: you find it flashing when you are back). Hidden, she does not."""
+        prefs, since = state["prefs"], state["waited"]
+        if prefs.nudge:
+            terminal.window()  # known before it is needed: a click on her, a call
+        due = (prefs.nudge and since is not None and state["shown"] and not state["ending"]
+               and time.monotonic() - since >= prefs.waitingAfter)
+        if due:
+            if state["calling"] is None:
+                state["calling"] = time.monotonic()
+                redraw()
+            terminal.call(True)  # once its window is known: it may still be looked for
+        elif state["calling"] is not None:
+            state["calling"] = None
+            terminal.call(False)
+            redraw()
+
+    def watch_away():
+        """You away, or back: her note of what happened meanwhile."""
+        if not state["prefs"].away:
+            notes.read()
+            if state["noted"] is not None:
+                state["noted"] = None
+                redraw()
+            return
+        notes.step(time.time(), idle_s(), presence.dark())
+        if (notes.note is not None) != (state["noted"] is not None):
+            state["noted"] = time.monotonic() if notes.note is not None else None
+            redraw()
 
     def answer_call():
         """Sends a call as she fires her finish; while a fullscreen game or
@@ -1635,6 +1830,7 @@ def run_window(parent, starter):
             x, y = fx.magic_from(width, height)
             start = (state["pos"]["x"] + x, state["pos"]["y"] + y)
         calls.send(start, sprites or fx.build_sprites(HEIGHT), calm())
+        cue("magic")
 
     def draw_card():
         hover["refresh"] = None
@@ -1644,6 +1840,9 @@ def run_window(parent, starter):
         limits = freshest_limits([state["info"].get("limits")] + others_limits())
         info = {**state["info"], "limits": limits}
         title, lines = card_lines(state["mood"] or "idle", info, time.time() * 1000)
+        if state["noted"] is not None:
+            hover["read"] = True
+            lines = notes.lines() + [("dim", "")] + lines
         card_title.config(text=title)
         draw_rows(card_body, font, lines)
         card.update_idletasks()
@@ -1672,6 +1871,11 @@ def run_window(parent, starter):
             hover["refresh"] = None
         hover["shown"] = False
         card.withdraw()
+        if hover["read"]:
+            hover["read"] = False
+            notes.read()  # you have read her note: she puts it away
+            state["noted"] = None
+            redraw()
 
     def hover_end(_e):
         # A gap between her and a symbol can slip the pointer off for a moment.
@@ -1691,6 +1895,12 @@ def run_window(parent, starter):
                 return
             # The mod was unloaded: its next overlay takes over this spot
             # (the lock stays for it) without an intro.
+            state["handover"] = True
+            root.destroy()
+            return
+        if is_replaced(parent):
+            # A newer overlay of this session stands here now: no outro,
+            # nothing removed, her spot is already its.
             state["handover"] = True
             root.destroy()
             return
@@ -1829,6 +2039,8 @@ def run_window(parent, starter):
         # second release right after it sent her back, leaves it alone.
         if state["drag"] and state["drag"]["moved"]:
             save_pos()
+        elif state["drag"] and state["prefs"].nudge:
+            terminal.come()  # a click: to her terminal
         if state["carry"]:
             state["carry"].drop(time.monotonic())  # set down
         state["drag"] = None
@@ -1862,6 +2074,7 @@ def run_window(parent, starter):
     every(SWEEP_EVERY_MS, sweep)
     every(SCREENS_EVERY_MS, watch_screens)
     every(ON_TOP_EVERY_MS, stay_on_top)
+    every(AWAY_EVERY_MS, watch_away)
     try:
         root.mainloop()
     finally:
@@ -1886,6 +2099,7 @@ def main():
     starter = starter_pid()
     parent = claude_code_of(starter, process_table())
     sweep(parent)
+    claim_session(parent)  # before her spot: an older overlay still here steps aside
     run_window(parent, starter)
 
 

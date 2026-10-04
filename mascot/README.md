@@ -44,19 +44,49 @@ A tag under her feet names the session's project (numbered, `app ·1`,
     takes the focus.
   - `/mascot magic` sends one now, to try it (so does the settings window's
     "Send one now").
+- With sound on (off by default: `/mascot sound on`), she has a sound for
+  the moments that tell you something: a chime once she has waited on you
+  for 30 seconds (a question or a permission), a cheer when a round of
+  work is done, her own fanfare for the beam, a soft "uh-oh" when a turn
+  dies on an error. Cursor magic and her coming and going can have one too
+  (off until you turn them on). Each character has her own sounds; any
+  moment can play a file of yours instead. Two never play at once, even
+  from several sessions, and she is quiet while hidden or while your
+  screen is off or locked (nothing she missed plays later).
+- She can tell you more, each off until you turn it on (`/mascot call`,
+  `remote`, `away`, or the settings window's Notifications page), each her
+  own way: Miku's messenger is a little phone, Yunseul's a bat carrying a
+  letter sealed in crimson wax.
+  - Call me: once she has waited on you as long as her waiting sound
+    waits (30 seconds), her messenger calls by her head and her terminal's
+    button blinks in the taskbar until you bring it forward. A click on her
+    brings her terminal's window forward (Windows Terminal keeps several
+    sessions in one window, on the tab you left it at).
+  - Remote Control: a prompt you send from the Claude app on your phone,
+    from the web, or from a chat a channel relays comes in with her
+    messenger.
+  - Away notes: when nobody has touched the keyboard or mouse for 5
+    minutes, or your screen is off or locked, she keeps a note of what
+    happens (work done, a turn that failed, waiting on you, prompts from
+    elsewhere). Back at your PC, she holds the note at her feet; hover her
+    and the card shows it, then she puts it away.
+  - Like her sounds, none of it plays while she is hidden.
 - `/mascot settings` opens the settings window; the other settings commands
   are below.
 - `/mascot update` updates her the way she was installed: `claude plugin
   update` for a marketplace install, `git pull --ff-only` for a clone (a
   copy that is neither says how to do it by hand). It runs in the
   background and says how it went; `/reload-plugins` then loads the new
-  version (a clone's files changing may reload it on their own).
+  version (a clone's files changing may reload it on their own). Your
+  other sessions keep the version they loaded until then: each says so in
+  a toast once, and on her card and in the settings window, until you type
+  `/reload-plugins` there.
 - A new version greets you: the first time one newer than the last she
   ran loads (however it came), she holds up a "NEW! v0.15.0" banner in her
   main color while stars and notes fountain up around her, and a toast
   says what is new (`whatsnew.json`): one line, news before fixes, and
-  how many more since the version you had. Once per version, for
-  whichever session loads it first. `/mascot news` lists all of it (`all`:
+  how many more since the version you had. Once per version in each
+  session: the first to load it, and each one you reload into it. `/mascot news` lists all of it (`all`:
   every version), as does the settings window's What's new page.
 - Several mascots stand side by side, never on top of each other: the first
   in the main display's bottom-right corner, each next one to the left of the
@@ -105,6 +135,14 @@ in `~/.claude/mascot/settings.json`, which holds only what you changed.
 | `/mascot magic after [MINUTES\|never\|default]` | How long a round of work lasts before its end sends magic to your pointer (0 for every round; up to 120), or never (the default). |
 | `/mascot updates [on\|off]` | Look for a newer version once a day (off): one read of this plugin's `plugin.json` on GitHub, nothing sent. When there is one, her hover card says so and the settings window offers it. With no value, it also says her version. |
 | `/mascot news [all]` | What is new since the version you had before her last update, by version (`all`: every version). |
+| `/mascot sound [on\|off]` | Her sounds (off). With no value, it lists what each moment plays. |
+| `/mascot sound volume [0-100\|default]` | Their volume (60). |
+| `/mascot sound wait [SECONDS\|default]` | How long she waits on you before her waiting sound (30; 10 to 300). |
+| `/mascot sound MOMENT [on\|off\|default\|FILE]` | What a moment plays: `waiting`, `done`, `beam`, `error`, `magic`, `intro` or `outro`. `default` is her own sound; `FILE` is the name of a `.wav` or `.mp3` of yours in `~/.claude/mascot/sounds/` (up to 8 seconds). Waiting, done, beam and error play hers by default; the rest nothing. |
+| `/mascot sound try MOMENT` | Plays a moment's sound now, to hear it. |
+| `/mascot call [on\|off]` | Call me: once she has waited on you as long as her waiting sound waits, her messenger calls and her terminal blinks in the taskbar; a click on her brings her terminal forward. Off by default. |
+| `/mascot remote [on\|off]` | Prompts sent from Remote Control (your phone, the web) or a chat come in with her messenger. Off by default. |
+| `/mascot away [on\|off]` | Away notes: what happened while you were away, on a note she holds when you are back. Off by default. |
 | `/mascot reset` | Every setting back to its default. |
 
 With no value, each command says what the setting is now. The file can be
@@ -116,7 +154,12 @@ The settings window has the same settings in the character's own colors
 tile for each, in her colors, and "Remember for this project"), her size
 with a preview of her at it, calm mode and smooth sparkles, the aura's
 three thresholds on one track, the beam, cursor magic (with a "Send one
-now" to try it), and updates (her version, what is new since the one
+now" to try it, and "Notifications…": a page with Call me, Remote
+Control and away notes, each pictured in her style), sound (on or off and its volume, and "Choose sounds…":
+a page with how long she waits on you first and a row per moment, each
+with its own switch, Try, Choose… and Default; a file you choose is
+copied into `~/.claude/mascot/sounds/`, so moving the original never
+breaks it), and updates (her version, what is new since the one
 before, a page of every version's news, the daily check, and an Update
 button when a newer version is out, following the update as it runs).
 A change is saved at once, and a change made elsewhere
@@ -198,6 +241,8 @@ Two characters come with it, each with her own art, colors and effects
 | beam | "Love Bite" (러브 바이트!): bats spiral into her heart hands, then stitched hearts and a swarm of bats burst out, crimson rays and a shockwave behind her, the banner on bat wings; petals drift down |
 | glitch | a haunt: silver and crimson afterimages, an ectoplasm ripple |
 | coming, going | a summoning circle traces itself, candles light, mist rises, bats swirl in and she forms out of smoke; she leaves in a burst of bats (a /clear blows the candles out) |
+| sounds | a music box, low bells, an organ and bats; Love Bite is an organ sting with a little nibble |
+| messenger | a bat with a letter sealed in crimson wax: it shakes the letter at you, drops it in with a prompt from elsewhere, and leaves one at her feet while you are away |
 | aura | moonlight; crimson with petals and bats; a blood moon behind her, beating like a heart |
 | 5-hour limit | candles guttering at her feet |
 | weekly limit | a ghost fade from her feet up |
@@ -219,6 +264,12 @@ from the character (a bubble or notes drawn into the art) is dropped: the
 overlay draws each mood's symbol itself, so new art is made without one. A
 mood with no art plays idle's frames under its symbol. A new character needs
 at least its idle art; then `/mascot character NAME` shows it.
+
+Her sounds are `frames/<character>/sounds/<moment>.wav` (a character
+without them has Miku's). Miku's and Yunseul's are made from nothing but
+code by `scripts/make_sounds.py` (bells, music box tines, an organ,
+sweeps and filtered noise: no recordings, no voice samples); the same code
+makes the same files, and `--check` says whether they match.
 
 Its `theme.json` gives the settings window's palette and names, and under
 `effects` the colors its symbols, aura, beam, hologram and glitch are drawn

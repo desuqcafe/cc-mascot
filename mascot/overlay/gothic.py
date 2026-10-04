@@ -26,6 +26,11 @@ of Miku's concert. Same roles, her own shapes and motion:
            with bat wings; petals drift down after.
   call     a glint flies to the pointer trailing petals and bats, roses
            burst there, two bats and a stitched heart circle it.
+  messages a bat carries a letter sealed in crimson wax: it flutters by
+           her head, shaking the letter, while she has waited on you; it
+           swoops in with a prompt sent from elsewhere and drops the letter,
+           which flutters down and fades; a letter waits at her feet with
+           what happened while you were away.
 
 Everything takes its colors from the look (`fx.MAIN`...) when drawn, so a
 character's theme recolors it; positions are shares of her frame, as in
@@ -440,6 +445,24 @@ def _grumpy_cloud(w, h, line):
     return big.resize(img.size, Image.LANCZOS)
 
 
+def _letter(w, h, line):
+    """A letter sealed in crimson wax: her pale paper in a rim, the flap's
+    fold, a round seal with a tiny heart pressed in it."""
+    S = fx.SUPER
+    shape, d = fx._mask(w, h)
+    d.rounded_rectangle((S, S, (w + 1) * S, (h + 1) * S), radius=max(1, w * 0.08) * S, fill=255)
+    out = fx._filled(shape, fx.WHITE, fx.PALE, fx.MAIN_SHADE, line)
+    pen = ImageDraw.Draw(out)
+    fold = [(1.6 * S, 1.6 * S), ((w / 2 + 1) * S, (h * 0.56 + 1) * S), ((w + 0.4) * S, 1.6 * S)]
+    pen.line(fold, fill=fx.MAIN_SHADE + (255,), width=max(S, round(line * S * 0.8)), joint="curve")
+    cx, cy, r = (w / 2 + 1) * S, (h * 0.56 + 1) * S, w * 0.17 * S
+    pen.ellipse((cx - r, cy - r, cx + r, cy + r), fill=fx.ACCENT + (255,), outline=fx.ACCENT_SHADE + (255,),
+                width=max(S, round(line * S * 0.6)))
+    heart = fx._heart_shape(max(4, round(w * 0.16))).resize((round(r * 1.1),) * 2, Image.LANCZOS)
+    pen.bitmap((round(cx - heart.width / 2), round(cy - heart.height / 2)), heart, fill=fx.ACCENT_SHADE + (255,))
+    return fx._down(out)
+
+
 def _winged_banner(text, size, line, tint=None, plain=None):
     """The call on her accent's sticker pill (fx._banner; or `tint`'s),
     bat wings out of its sides."""
@@ -514,6 +537,8 @@ def build_sprites(height):
         "flame": gl(_flame(px(6), px(10)), fx.GOLD, px(4), 1.0),
         "mist": _mist(px(70), px(26), fx.PALE, 0.55),
         "wisp": _mist(px(22), px(12), fx.PALE, 0.7),
+        "letter": gl(st(_letter(px(24), px(17), px(1.5)), px(1.5)), ML, px(3), 0.5),
+        "away_note": gl(st(_letter(px(32), px(23), line), px(2)), ML, px(4), 0.5),
     }
     for tint, ink, light in (("main", M, ML), ("accent", A, AL)):
         for pose, angle in (("up", 38), ("mid", 6), ("down", -32)):
@@ -527,6 +552,12 @@ def build_sprites(height):
         sprites[f"dot_{tint}"] = gl(_gem(px(8), ink), light, px(3), 0.9)
         sprites[f"pip_{tint}"] = gl(st(_cross_stitch(px(7), ink), px(1)), light, px(2), 0.6)
         sprites[f"spark_{tint}"] = gl(_glint(px(8), fx.WHITE), light, px(2), 0.9)
+    # Miku's name for her messenger: here the bat with its letter, still.
+    bat, letter = sprites["bat_main_mid"], sprites["letter"]
+    carried = Image.new("RGBA", (max(bat.width, letter.width), bat.height // 2 + letter.height), (0, 0, 0, 0))
+    carried.alpha_composite(letter, ((carried.width - letter.width) // 2, carried.height - letter.height))
+    carried.alpha_composite(bat, ((carried.width - bat.width) // 2, 0))
+    sprites["messenger"] = carried
     sprites["star_main"] = gl(_gem_glint(px(22), fx.MAIN_LIGHT), ML, px(4), 0.8)
     sprites["star_accent"] = gl(st(_rose(px(18), A, fx.ACCENT_SHADE, px(1)), px(1.5)), AL, px(4), 0.6)
     sprites["star_gold"] = gl(st(_crescent(px(16), fx.GOLD), px(1.5)), fx.GOLD, px(4), 0.6)
@@ -633,6 +664,87 @@ def waiting(w, h, t, age):
     draws.append(Draw("speech", sx, sy, grow * squash))
     draws.append(Draw("question", sx + 0.004 * w, sy - 0.016 * h - 3 * hop, grow * (1 + 0.1 * hop), 1.0, -10 * hop))
     draws.append(Draw(_bat(t, 0, "main", 3.0), sx + 0.08 * w, sy + 0.04 * h + 1.5 * math.sin(t * 3), grow * 0.6, 1.0, 10 * math.sin(t * 1.7)))
+    return draws
+
+
+# ---------------------------------------------------------- messages
+#
+# Her messenger is a bat carrying a sealed letter, at her upper left (Miku's
+# phone's spot); her away note a letter at her feet.
+
+LETTER_HANG = 0.062  # the letter hangs this share of her height under the bat
+
+
+def _messenger(x, y, h, t, swing, grow, alpha=1.0, hz=FLAP_HZ):
+    """A bat at (x, y) with its letter hanging under it, swung `swing`
+    degrees (`h`: her frame's height)."""
+    a = math.radians(swing)
+    lx, ly = x - math.sin(a) * LETTER_HANG * h, y + math.cos(a) * LETTER_HANG * h
+    return [Draw("letter", lx, ly, grow, alpha, swing),
+            Draw(_bat(t, 7, "main", hz), x, y, grow * 1.25, alpha, 6 * math.sin(t * 2))]
+
+
+def calling(w, h, t, age, calm=False):
+    """The bat flutters by her head with its letter; in bursts, it shakes
+    the letter at you and a petal or two falls (calm: no petals)."""
+    x, y = fx.CALL_AT[0] * w, fx.CALL_AT[1] * h - 0.03 * h
+    grow = pop(age)
+    beat = age % fx.CALL_EVERY
+    ringing = age > 0.3 and beat < fx.CALL_RING_S
+    swing = 8 * math.sin(t * 1.7) + (0.0 if not ringing else 16 * math.sin(beat * 30) * (1 - beat / fx.CALL_RING_S))
+    bob = 3 * math.sin(t * 3.1)
+    draws = []
+    if ringing and not calm:
+        p = beat / fx.CALL_RING_S
+        for i in range(2):
+            draws.append(Draw("pixel_accent", x + (i * 2 - 1) * 0.03 * w, y + 0.06 * h + 0.06 * h * p,
+                              1.3, 1 - p, 200 * p + 90 * i))
+    draws += _messenger(x, y + bob, h, t, swing, grow, hz=8.0 if ringing else FLAP_HZ)
+    return draws
+
+
+def delivered(w, h, t, age, calm=False):
+    """The bat swoops in with a letter, lets it go by her head and flies
+    off; the letter flutters down past her and fades."""
+    if not 0 <= age < fx.DELIVER_S:
+        return []
+    x1, y1 = fx.CALL_AT[0] * w, fx.CALL_AT[1] * h - 0.03 * h
+    drop = 0.9  # the letter goes
+    draws = []
+    if age < drop:
+        fly = min(1.0, age / fx.DELIVER_IN_S)
+        e = 1 - (1 - fly) ** 3
+        x = -0.12 * w + (x1 + 0.12 * w) * e
+        y = -0.1 * h + (y1 + 0.1 * h) * e + 0.05 * h * math.sin(math.pi * fly)
+        draws += _messenger(x, y + 2 * math.sin(t * 3), h, t, 10 * math.sin(age * 9), pop(age, 0, 0.3), hz=8.0)
+        return draws
+    q = (age - drop) / (fx.DELIVER_S - drop)
+    fade = min(1.0, (1 - q) / 0.35)
+    # The letter, falling and rocking like paper.
+    lx = x1 + 0.08 * w * math.sin(q * 5) + 0.06 * w * q
+    ly = y1 + LETTER_HANG * h + 0.5 * h * (q ** 1.4)
+    draws.append(Draw("letter", lx, ly, 1.0, fade, 25 * math.sin(q * 10)))
+    # The bat, off up and away.
+    bx, by = x1 - 0.15 * w * q, y1 - 0.25 * h * q
+    draws.append(Draw(_bat(t, 7, "main", 8.0), bx, by, 1.25 * (1 - 0.3 * q), min(1.0, (1 - q) / 0.5)))
+    if not calm and q < 0.3:
+        p = q / 0.3
+        for i in range(4):
+            a = math.tau * i / 4 + 0.5
+            draws.append(Draw("spark_accent" if i % 2 else "spark_main", x1 + 0.05 * w * p * math.cos(a),
+                              y1 + 0.05 * h + 0.05 * w * p * math.sin(a), 1.1 * (1 - p), 1 - p, 90 * p))
+    return draws
+
+
+def noted(w, h, t, age, calm=False):
+    """A sealed letter waiting at her feet; a glint crosses its seal now
+    and then (calm: none)."""
+    x, y = fx.NOTE_AT[0] * w, fx.NOTE_AT[1] * h + 0.02 * h
+    draws = [Draw("away_note", x, y, pop(age), 1.0, -12)]
+    if not calm:
+        p = (age % 3.4) / 0.8
+        if p < 1:
+            draws.append(Draw("spark_main", x + 0.02 * w, y - 0.01 * h, 1.2 * pulse(p), pulse(p), 90 * p))
     return draws
 
 

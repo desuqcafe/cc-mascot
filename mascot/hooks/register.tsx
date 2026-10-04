@@ -3,11 +3,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type {
   MascotCall,
+  MascotCue,
   MascotFrame,
+  MascotMoment,
   MascotMood,
   MascotSessionFile,
   MascotSettings,
   MascotUpdate,
+  MascotVisit,
   MascotVisibility,
   MascotWork,
 } from '../types'
@@ -109,7 +112,17 @@ const work = atom({ plugin: 'mascot', key: 'work' } as const, {
 // by /mascot (and the settings window, and by hand), followed live by every
 // overlay. overlay/settings.py holds the same rules: a key left out, or a
 // value that is not a valid one, is its default.
-type Settings = Required<{ [K in keyof MascotSettings]: Exclude<MascotSettings[K], undefined> }>
+type Sounds = Record<MascotMoment, boolean | string>
+type Settings = Required<{ [K in Exclude<keyof MascotSettings, 'sounds'>]: Exclude<MascotSettings[K], undefined> }> & {
+  sounds: Sounds
+}
+// The moments she has a sound for, and which of them sound once `sound` is
+// on: the ones that tell you something. Coming and going only when asked for.
+const MOMENTS: MascotMoment[] = ['waiting', 'done', 'beam', 'error', 'magic', 'intro', 'outro']
+const SOUNDS: Sounds = { waiting: true, done: true, beam: true, error: true, magic: false, intro: false, outro: false }
+// A file of yours: a bare name, looked for in the mascot folder's sounds/
+// and nowhere else; .wav or .mp3. settings.py checks it by the same pattern.
+const SOUND_FILE = /^[^\\/:*?"<>|\x00-\x1f]{1,120}\.(wav|mp3)$/i
 const DEFAULTS: Settings = {
   size: 420,
   calm: false,
@@ -119,15 +132,35 @@ const DEFAULTS: Settings = {
   beamForAgents: true,
   magicAfter: false,
   checkUpdates: false,
+  sound: false,
+  volume: 60,
+  sounds: SOUNDS,
+  waitingAfter: 30,
+  nudge: false,
+  remote: false,
+  away: false,
 }
 const SIZE_RANGE = [240, 640] as const
 const SIZES: Record<string, number> = { small: 300, normal: 420, large: 560 }
 const AURA_RANGE = [10_000, 10_000_000] as const
 const BEAM_RANGE = [1, 120] as const
 const MAGIC_RANGE = [0, 120] as const
+const VOLUME_RANGE = [0, 100] as const
+const WAITING_RANGE = [10, 300] as const
 
 const inRange = (v: unknown, [low, high]: readonly [number, number]): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v >= low && v <= high
+
+// A moment's sound as `sounds` takes it, or undefined when not a valid one.
+const soundChoice = (v: unknown): boolean | string | undefined =>
+  typeof v === 'boolean' ? v : typeof v === 'string' && v.trim() === v && SOUND_FILE.test(v) ? v : undefined
+
+// A checked value as the file holds it: `sounds` keeps only the moments
+// that differ from their defaults.
+const written = <K extends keyof Settings>(key: K, value: Settings[K]): unknown =>
+  key === 'sounds'
+    ? Object.fromEntries(Object.entries(value as Sounds).filter(([m, v]) => v !== SOUNDS[m as MascotMoment]))
+    : value
 
 const checks: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined } = {
   size: v => (inRange(v, SIZE_RANGE) ? Math.round(v) : undefined),
@@ -143,11 +176,24 @@ const checks: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   beamForAgents: v => (typeof v === 'boolean' ? v : undefined),
   magicAfter: v => (v === false ? false : inRange(v, MAGIC_RANGE) ? Math.round(v) : undefined),
   checkUpdates: v => (typeof v === 'boolean' ? v : undefined),
+  sound: v => (typeof v === 'boolean' ? v : undefined),
+  volume: v => (inRange(v, VOLUME_RANGE) ? Math.round(v) : undefined),
+  // Every moment, each on its own: one not valid is its default alone.
+  sounds: v => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+    const given = v as Record<string, unknown>
+    return Object.fromEntries(MOMENTS.map(m => [m, soundChoice(given[m]) ?? SOUNDS[m]])) as Sounds
+  },
+  waitingAfter: v => (inRange(v, WAITING_RANGE) ? Math.round(v) : undefined),
+  nudge: v => (typeof v === 'boolean' ? v : undefined),
+  remote: v => (typeof v === 'boolean' ? v : undefined),
+  away: v => (typeof v === 'boolean' ? v : undefined),
 }
 
 const viewState = atom({ plugin: 'mascot', key: 'view' } as const, { visible: false, at: 0 } as MascotVisibility)
 const keyState = atom({ plugin: 'mascot', key: 'sessionKey' } as const, '')
 const characterState = atom({ plugin: 'mascot', key: 'character' } as const, '')
+const ranState = atom({ plugin: 'mascot', key: 'ran' } as const, '')
 
 // The overlay (overlay/mascot_overlay.py) is a desktop window of its own that
 // watches this session's file, which this module writes. It runs as long as
@@ -167,6 +213,13 @@ let isEnded = false
 let clearedAt: number | undefined
 // Her last call to the pointer: the overlay sends one when this changes.
 let call: MascotCall | undefined
+// The last moment only this module knows (a round done, the beam, a turn
+// that died): the overlay plays its sound when this changes, as the
+// settings say. It finds the other moments itself.
+let cue: MascotCue | undefined
+// The last prompt that came from elsewhere (Remote Control, a channel): the
+// overlay shows it come in when the `remote` setting says so.
+let visit: MascotVisit | undefined
 // The character the overlay shows: a new one (/mascot character) makes it
 // play its outro, take on the new art and play its intro, on the same spot.
 let characterNow: string | undefined
@@ -176,6 +229,8 @@ let sessionCharacter: string | undefined
 // Her version and its updates, as the session file carries them; and how
 // this copy updates (`routeOf`).
 let release: MascotUpdate | undefined
+// The version this conversation ran last; kept in `ranState`.
+let ranVersion: string | undefined
 let updater: Route = { route: 'manual' }
 let isChecking = false
 let isUpdating = false
@@ -212,8 +267,10 @@ type CardInfo = {
   turnSince?: number
   subagents: { type: string; tokens?: number; percent?: number }[]
   background: Record<string, number>
-  // A newer release the daily check found.
+  // A newer release the daily check found, and a newer version installed
+  // than the one running (an update run from another session).
   newVersion?: string
+  installed?: string
 }
 
 let frameNow: MascotFrame = 'idle'
@@ -267,6 +324,13 @@ const loadSettings = async ($: EngineInterface): Promise<Settings> => {
     beamForAgents: pick('beamForAgents'),
     magicAfter: pick('magicAfter'),
     checkUpdates: pick('checkUpdates'),
+    sound: pick('sound'),
+    volume: pick('volume'),
+    sounds: pick('sounds'),
+    waitingAfter: pick('waitingAfter'),
+    nudge: pick('nudge'),
+    remote: pick('remote'),
+    away: pick('away'),
   }
 }
 
@@ -279,7 +343,7 @@ const saveSettings = async ($: EngineInterface, changes: { [K in keyof Settings]
   for (const key of Object.keys(changes) as (keyof Settings)[]) {
     const value = changes[key] === null ? undefined : checks[key](changes[key])
     if (value === undefined || JSON.stringify(value) === JSON.stringify(DEFAULTS[key])) delete raw[key]
-    else raw[key] = value
+    else raw[key] = written(key, value)
   }
   await $.fs.write(path, JSON.stringify(raw, null, 2))
 }
@@ -294,6 +358,7 @@ const sessionFile = async ($: EngineInterface) => {
     // the choice to show or hide with it.
     if (sessionKey && view.at) await update($, viewState, () => view).catch(() => {})
     if (sessionCharacter) await update($, characterState, () => sessionCharacter!).catch(() => {})
+    if (ranVersion) await update($, ranState, () => ranVersion!).catch(() => {})
     sessionKey ??= await $.session.id()
     await update($, keyState, () => sessionKey!).catch(() => {})
   }
@@ -314,6 +379,8 @@ const writeFile = async ($: EngineInterface) => {
       character: characterNow,
       update: release,
       call,
+      cue,
+      visit,
     }
     if (path) await $.fs.write(path, JSON.stringify(file))
   } catch {
@@ -390,6 +457,7 @@ const refreshCard = async ($: EngineInterface) => {
       })),
       background: live.background,
       newVersion: release?.latest,
+      installed: release?.installed,
     }
     await writeFile($)
   } catch {
@@ -560,7 +628,7 @@ const newsText = async ($: EngineInterface, every: boolean) => {
 const setRelease = async ($: EngineInterface, changes: Partial<MascotUpdate>) => {
   if (!release) return
   release = { ...release, ...changes }
-  if (card) card = { ...card, newVersion: release.latest }
+  if (card) card = { ...card, newVersion: release.latest, installed: release.installed }
   await writeFile($)
 }
 
@@ -572,18 +640,28 @@ const startRelease = async ($: EngineInterface) => {
     if (!version) return
     updater = await routeOf($)
     const last = await quiet($.store.get(VERSION_KEY))
+    // The version this conversation ran before a reload: newer is new to
+    // this session too, though another session has run it already.
+    ranVersion ??= (await read($, ranState).catch(() => '')) || undefined
+    const ran = ranVersion
     const seen = (await quiet($.store.get(LATEST_KEY))) as { version?: unknown } | undefined
     const latest = isVersion(seen?.version) && isNewer(seen.version, version) ? seen.version : undefined
     release = { version, route: updater.route, latest }
     const upgrade = (await quiet($.store.get(UPGRADE_KEY))) as { from?: unknown; to?: unknown } | undefined
     if (upgrade?.to === version && isVersion(upgrade.from)) release.from = upgrade.from
     if (!isVersion(last) || isNewer(version, last)) await $.store.set(VERSION_KEY, version)
-    if (isVersion(last) && isNewer(version, last)) {
+    ranVersion = version
+    await update($, ranState, () => version).catch(() => {})
+    const isNewEverywhere = isVersion(last) && isNewer(version, last)
+    if (isNewEverywhere || (isVersion(ran) && isNewer(version, ran))) {
       release.celebrate = await $.clock.now()
-      release.from = last
-      await $.store.set(UPGRADE_KEY, { from: last, to: version })
+      if (isNewEverywhere) {
+        release.from = last
+        await $.store.set(UPGRADE_KEY, { from: last, to: version })
+      }
+      release.from ??= ran
       // One line, the one worth telling, and how to read the rest.
-      const news = await notesBetween($, last, version)
+      const news = await notesBetween($, release.from, version)
       const lead = headline(news)
       const more = news.length - (lead ? 1 : 0)
       $.ui.toast(
@@ -596,6 +674,43 @@ const startRelease = async ($: EngineInterface) => {
     void checkForUpdates($)
   } catch {
     // A mascot never gets in the way of the session.
+  }
+}
+
+// The version installed now, which may be newer than the one running: an
+// update run from another session. A marketplace install reads Claude
+// Code's list of installed plugins, beside its cache; a clone or a folder,
+// its manifest on disk.
+const installedVersion = async ($: EngineInterface): Promise<string | undefined> => {
+  if (updater.route !== 'marketplace') {
+    return versionIn(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+  }
+  const parts = $.plugin.root.split(/[\\/]/)
+  const at = parts.lastIndexOf('cache')
+  const listed = JSON.parse(await $.fs.read(`${parts.slice(0, at).join('/')}/installed_plugins.json`)) as {
+    plugins?: Record<string, { version?: unknown }[]>
+  } | null
+  const entries = listed?.plugins?.[`${$.plugin.name}@${updater.marketplace}`]
+  const versions = (Array.isArray(entries) ? entries : []).map(e => e?.version).filter(isVersion)
+  return versions.sort((a, b) => (isNewer(a, b) ? -1 : 1))[0]
+}
+
+// Every 30 s: a newer version installed meanwhile (an update run from
+// another session) is told here once, and on her card and in the settings
+// window until this session reloads.
+const checkInstalled = async ($: EngineInterface) => {
+  if (!release || isUpdating) return
+  try {
+    const installed = await installedVersion($)
+    const newer = installed && isNewer(installed, release.version) ? installed : undefined
+    if (newer === release.installed) return
+    // The session that updated has said so already.
+    if (newer && release.state !== 'updated') {
+      $.ui.toast(`Mascot v${newer} is installed: type /reload-plugins to meet her (this session runs v${release.version}).`)
+    }
+    await setRelease($, { installed: newer })
+  } catch {
+    // Unreadable now: the next look will do.
   }
 }
 
@@ -650,6 +765,13 @@ const runUpdate = async ($: EngineInterface): Promise<string> => {
     const said = (done.stdout + '\n' + done.stderr).trim().split(/\r?\n/).filter(l => l.trim())
     if (done.exitCode !== 0) throw new Error(said.pop() ?? `exit code ${done.exitCode}`)
     if (said.some(l => /already (up to date|at the latest)/i.test(l))) {
+      // The latest on disk, maybe not here: another session updated her.
+      const installed = await quiet(installedVersion($))
+      if (installed && isNewer(installed, release.version)) {
+        const message = `v${installed} is installed: type /reload-plugins to meet her.`
+        await setRelease($, { state: 'updated', message, installed, latest: undefined })
+        return `Mascot ${message} This session still runs v${release.version}.`
+      }
       await setRelease($, { state: undefined, latest: undefined })
       return `Mascot v${release.version} is the latest.`
     }
@@ -879,6 +1001,7 @@ const settle = async ($: EngineInterface) => {
       minutes !== false && round.since !== undefined && now - round.since >= minutes * 60_000
     const isBig = (beamForAgents && round.hadAgents) || lasted(beamAfter)
     if (lasted(magicAfter)) call = { at: now }
+    cue = { at: now, moment: isBig ? 'beam' : 'done' }
     round = newRound()
     await show($, isBig ? 'beam' : 'happy', { holdMs: isBig ? BEAM_MS : HOLD_MS, after: 'idle' })
   } catch {
@@ -894,8 +1017,11 @@ const sendMagic = async ($: EngineInterface, test = false) => {
 }
 
 // The turn died on an error (an API error past its retries, a refusal).
+// Both turn.complete and StopFailure may say so: one sound for the two.
 const fail = async ($: EngineInterface) => {
   await update($, work, cur => ({ ...cur, inTurn: false, isSettled: true })).catch(() => {})
+  const now = await quiet($.clock.now())
+  if (now !== undefined && !(cue?.moment === 'error' && now - cue.at < HOLD_MS)) cue = { at: now, moment: 'error' }
   await show($, 'error', { holdMs: HOLD_MS, after: 'idle' })
 }
 
@@ -918,7 +1044,9 @@ const describe = {
     s.calm ? 'Calm mode on: no glitch, particles, flicker or flashes.' : 'Calm mode off.',
   smooth: (s: Settings) =>
     s.smooth
-      ? 'Smooth sparkles on: her sparkles move as smoothly as her symbols (heavier while she works).'
+      ? `Smooth sparkles on: her sparkles move as smoothly as her symbols, using more CPU while she works${
+          s.calm ? ' (calm mode is on, so she has no sparkles to smooth)' : ''
+        }.`
       : 'Smooth sparkles off: her sparkles move in step with her drawn frames.',
   aura: (s: Settings) =>
     s.aura === false ? 'Aura off.' : `Aura from ${s.aura.map(fmtTokens).join(', ')} tokens of context.`,
@@ -936,13 +1064,35 @@ const describe = {
       : `Rounds of work of ${s.magicAfter} min or more send magic to your pointer.`,
   checkUpdates: (s: Settings) =>
     s.checkUpdates ? 'Looks for a new version once a day.' : 'Never goes online to look for a new version.',
+  sound: (s: Settings) => (s.sound ? 'Sound on.' : 'Sound off.'),
+  volume: (s: Settings) => `Volume ${s.volume}%.`,
+  sounds: (s: Settings) => {
+    const own = MOMENTS.filter(m => s.sounds[m] === true)
+    const none = MOMENTS.filter(m => s.sounds[m] === false)
+    const files = MOMENTS.filter(m => typeof s.sounds[m] === 'string').map(m => `${m}: ${s.sounds[m]}`)
+    const parts = [
+      own.length ? `${own.join(', ')} her own` : '',
+      ...files,
+      none.length ? `${none.join(', ')} none` : '',
+    ].filter(Boolean)
+    return `Sounds: ${parts.join('; ')}.`
+  },
+  waitingAfter: (s: Settings) => `Her waiting sound after ${s.waitingAfter} s of waiting on you.`,
+  nudge: (s: Settings) =>
+    s.nudge
+      ? `Call me on: after ${s.waitingAfter} s of waiting on you, she calls and her terminal blinks in the taskbar; click her to bring it forward.`
+      : 'Call me off.',
+  remote: (s: Settings) =>
+    s.remote ? 'Remote on: she shows prompts sent from your phone, the web or a chat.' : 'Remote off.',
+  away: (s: Settings) =>
+    s.away ? 'Away notes on: back at your PC, she holds a note of what happened.' : 'Away notes off.',
 }
 
 const settingsSummary = (s: Settings) => Object.values(describe).map(line => line(s)).join(' ')
 
 // `/mascot <verb> ...` for a setting: its value with nothing after the verb;
 // undefined when the words are not a settings command at all.
-const settingsCommand = async ($: EngineInterface, words: string[]): Promise<string | undefined> => {
+const settingsCommand = async ($: EngineInterface, words: string[], raw: string[] = words): Promise<string | undefined> => {
   const [verb, ...rest] = words
   const set = async <K extends keyof Settings>(key: K, value: Settings[K] | null) => {
     await saveSettings($, { [key]: value })
@@ -1006,6 +1156,15 @@ const settingsCommand = async ($: EngineInterface, words: string[]): Promise<str
     if (value === 'on') void checkForUpdates($, true)
     return answer
   }
+  if (verb === 'sound') return soundCommand($, rest, raw.slice(1), set)
+  // On or off: /mascot call (the `nudge` setting), remote, away.
+  const switches: Record<string, 'nudge' | 'remote' | 'away'> = { call: 'nudge', remote: 'remote', away: 'away' }
+  const key = verb !== undefined && Object.hasOwn(switches, verb) ? switches[verb] : undefined
+  if (verb !== undefined && key && !extra) {
+    if (!value) return `${await now(key)} /mascot ${verb} on|off.`
+    if (value !== 'on' && value !== 'off') return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} takes on or off.`
+    return set(key, value === 'on')
+  }
   if (verb === 'settings' && !value) {
     const problem = await openSettingsWindow($)
     return `${problem ?? 'Settings window opened.'} ${settingsSummary(await loadSettings($))}`
@@ -1020,10 +1179,82 @@ const settingsCommand = async ($: EngineInterface, words: string[]): Promise<str
       beamForAgents: null,
       magicAfter: null,
       checkUpdates: null,
+      sound: null,
+      volume: null,
+      sounds: null,
+      waitingAfter: null,
+      nudge: null,
+      remote: null,
+      away: null,
     })
     return `Settings back to their defaults. ${settingsSummary(DEFAULTS)}`
   }
   return undefined
+}
+
+const soundName = (choice: boolean | string) => (choice === false ? 'none' : choice === true ? 'her own sound' : choice)
+
+// `/mascot sound ...`: `words` lower-cased, `raw` as typed (a file's name
+// keeps its case).
+const soundCommand = async (
+  $: EngineInterface,
+  words: string[],
+  raw: string[],
+  set: <K extends keyof Settings>(key: K, value: Settings[K] | null) => Promise<string>,
+): Promise<string> => {
+  const [what = '', value, extra] = words
+  const s = await loadSettings($)
+  const folder = `${(await stateDir($)) ?? '~/.claude/mascot'}/sounds`
+  const usage =
+    '/mascot sound on|off; volume <0-100>; wait <seconds>; <moment> on|off|default|<file>; try <moment>. ' +
+    `Moments: ${MOMENTS.join(', ')}. Your files go in ${folder}.`
+  if (!what) {
+    const about = ['sound', 'volume', 'sounds', 'waitingAfter'] as const
+    return `${about.map(key => describe[key](s)).join(' ')} ${usage}`
+  }
+  if ((what === 'on' || what === 'off') && !value) return set('sound', what === 'on')
+  if (what === 'volume' && !extra) {
+    if (!value) return `${describe.volume(s)} /mascot sound volume <0-100>|default.`
+    if (value === 'default') return set('volume', null)
+    const n = Number(value.replace(/%$/, ''))
+    if (checks.volume(n) === undefined) return 'Volume takes 0 to 100 (%) or default.'
+    return set('volume', n)
+  }
+  if (what === 'wait' && !extra) {
+    if (!value) return `${describe.waitingAfter(s)} /mascot sound wait <seconds>|default.`
+    if (value === 'default') return set('waitingAfter', null)
+    const n = Number(value.replace(/s(ec)?$/, ''))
+    if (checks.waitingAfter(n) === undefined) return 'Wait takes seconds (10 to 300) or default.'
+    return set('waitingAfter', n)
+  }
+  if (what === 'try' && !extra) {
+    const moment = MOMENTS.find(m => m === value)
+    if (!moment) return `Try which? ${MOMENTS.join(', ')}.`
+    cue = { at: await $.clock.now(), moment, test: true }
+    await writeFile($)
+    return `Playing her ${moment} sound.`
+  }
+  const moment = MOMENTS.find(m => m === what)
+  if (!moment) return usage
+  const now = s.sounds[moment]
+  const choose = async (choice: boolean | string) => {
+    await set('sounds', { ...s.sounds, [moment]: choice })
+    const off = (await loadSettings($)).sound ? '' : ' (Sound is off: /mascot sound on.)'
+    return `${moment.charAt(0).toUpperCase()}${moment.slice(1)}: ${soundName(choice)}.${off}`
+  }
+  if (!value) return `${moment}: ${soundName(now)}. ${usage}`
+  if (value === 'on' && !extra) return choose(typeof now === 'string' ? now : true)
+  if (value === 'off' && !extra) return choose(false)
+  if (value === 'default' && !extra) return choose(true)
+  // A file of yours, by its name as typed (spaces and all).
+  const name = raw.slice(1).join(' ')
+  if (typeof soundChoice(name) !== 'string') {
+    return `A sound of yours is a .wav or .mp3 file's name (no folder), in ${folder}.`
+  }
+  if (!(await quiet($.fs.exists(`${folder}/${name}`)))) {
+    return `No ${name} in ${folder}: put the file there first, or pick one in /mascot settings.`
+  }
+  return choose(name)
 }
 
 // A /clear or /resume: the conversation the figures and moods followed is gone.
@@ -1047,9 +1278,9 @@ export const register: Register = on => {
     await $.command.register({
       name: 'mascot',
       description:
-        "Show or hide this session's mascot (or every session's), pick its character, fire her beam, send magic to your pointer, update her, see what is new, or change her settings",
+        "Show or hide this session's mascot (or every session's), pick its character, fire her beam, send magic to your pointer, update her, see what is new, or change her settings and sounds",
       argumentHint:
-        '[show|hide] [all] | character [name] | beam | magic | update | news [all] | settings | size | calm | smooth | aura | beam after | magic after | updates | reset',
+        '[show|hide] [all] | character [name] | beam | magic | update | news [all] | settings | size | calm | smooth | aura | beam after | magic after | updates | sound | call | remote | away | reset',
       immediate: true,
     })
     // A reload keeps this session's choice; a new session takes the last one
@@ -1062,6 +1293,7 @@ export const register: Register = on => {
     $.clock.every(REFRESH_EVERY_MS, () => {
       void refreshCard($)
       void checkForUpdates($)
+      void checkInstalled($)
     })
     refreshSoon($)
 
@@ -1078,9 +1310,10 @@ export const register: Register = on => {
       '/mascot update updates her to the newest version; /mascot news says what is new (news all: every version). ' +
       'Settings, for every mascot: /mascot settings; size [small|normal|large|<px>]; calm [on|off]; smooth [on|off]; ' +
       'aura [<3 token counts>|off]; beam after [<minutes>|never]; beam agents [on|off]; ' +
-      'magic after [<minutes>|never]; updates [on|off]; reset.'
+      'magic after [<minutes>|never]; updates [on|off]; ' +
+      'sound [on|off|volume|wait|<moment>|try]; call [on|off]; remote [on|off]; away [on|off]; reset.'
     try {
-      const answer = await settingsCommand($, words)
+      const answer = await settingsCommand($, words, e.args.trim().split(/\s+/).filter(Boolean))
       if (answer !== undefined) return { text: answer }
     } catch (err) {
       return { text: `Mascot settings: ${err instanceof Error ? err.message : String(err)}` }
@@ -1090,6 +1323,7 @@ export const register: Register = on => {
       const now = await $.clock.now()
       const cur = await read($, mood)
       const back = cur.holdUntil > now ? cur.then : cur.frame
+      cue = { at: now, moment: 'beam' }
       await show($, 'beam', { holdMs: BEAM_MS, after: back === 'beam' ? 'idle' : back })
       const call = `${await beamName($)}!`
       return { text: view.visible ? call : `${call} (She is hidden: /mascot show to see it.)` }
@@ -1141,6 +1375,22 @@ export const register: Register = on => {
       const path = await sessionFile($).catch(() => undefined)
       const file: MascotSessionFile = { frame: frameNow, visible: false, visibleAt: view.at, ended: true }
       if (path) await $.fs.write(path, JSON.stringify(file)).catch(() => {})
+    }
+    return next(e)
+  })
+
+  // A prompt from elsewhere: Remote Control (a phone, the web) or a chat a
+  // channel relays. The overlay shows it come in when `remote` is on.
+  on('prompt.submit', async ($, e, next) => {
+    try {
+      const origin = e.origin
+      if (origin?.kind === 'bridge' || origin?.kind === 'channel') {
+        const at = await $.clock.now()
+        visit = origin.kind === 'channel' ? { at, from: 'channel', name: origin.server } : { at, from: 'bridge' }
+        await writeFile($)
+      }
+    } catch {
+      // A mascot never gets in the way of the session.
     }
     return next(e)
   })
