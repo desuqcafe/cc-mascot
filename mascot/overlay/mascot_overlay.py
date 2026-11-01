@@ -52,10 +52,10 @@ that clicks pass through; hidden, she sends it all the same. While the
 screen is dark or the PC locked (presence.py), she rests: nothing drawn,
 her art kept, her call held until you are back.
 
-She can tell you more (settings.py, each off by default): with `nudge`,
-once she has waited on you `waitingAfter` seconds her messenger calls and
-her terminal's taskbar button flashes (terminal.py), and a click on her
-brings her terminal forward; with `remote`, her messenger brings in a
+A click on her brings her terminal forward (terminal.py). She can tell you
+more (settings.py, each off by default): with `nudge`, once she has waited
+on you `waitingAfter` seconds her messenger calls and her terminal's
+taskbar button flashes; with `remote`, her messenger brings in a
 prompt sent from Remote Control or a chat (the session file's `visit`);
 with `away`, what happened while you were away waits on a note at her feet
 until her card has shown it to you (away.py).
@@ -103,6 +103,8 @@ import magic
 import settings as cfg
 import sound
 from away import Away, idle_s
+from courier import WAIT_S as MAIL_WAIT_S
+from courier import Courier, messenger_spot, sender_of, window_of
 from layered import LayeredWindow
 from presence import Presence
 from terminal import Terminal
@@ -430,8 +432,8 @@ def tag_image(text, size):
 Playing = namedtuple("Playing", "kind since then calm")
 Playing.__new__.__defaults__ = (False,)
 
-SessionState = namedtuple("SessionState", "mood info choice ended cleared character celebrate call cue visit")
-SessionState.__new__.__defaults__ = (0, None, None, None, None, None)
+SessionState = namedtuple("SessionState", "mood info choice ended cleared character celebrate call cue visit sent received")
+SessionState.__new__.__defaults__ = (0, None, None, None, None, None, None, None)
 
 # A new version's banner is played when the mod's word of it (`celebrate`,
 # epoch ms) is this fresh; an overlay started later, by a reload, lets it be.
@@ -481,6 +483,14 @@ def visit_of(data):
     if not isinstance(at, (int, float)) or isinstance(at, bool) or kind not in ("bridge", "channel"):
         return None
     return at, (name if kind == "channel" and isinstance(name, str) and name.strip() else VISIT_FROM.get(kind, "a chat"))
+
+
+def mail_of(data, key):
+    """When (epoch ms) the session file's `sent` or `received` (`key`) says
+    a message between sessions went or came; None for none (courier.py)."""
+    mail = data.get(key) if isinstance(data.get(key), dict) else {}
+    at = mail.get("at")
+    return at if isinstance(at, (int, float)) and not isinstance(at, bool) else None
 
 
 def is_news(visit):
@@ -540,6 +550,8 @@ def read_state(path=None):
         call_of(data),
         cue_of(data),
         visit_of(data),
+        mail_of(data, "sent"),
+        mail_of(data, "received"),
     )
 
 
@@ -653,26 +665,55 @@ def freshest_limits(readings):
     return [limit for _, limit in best.values()]
 
 
+def near_limits(limits, now_ms):
+    """The limits of `limits` nearly used (LIMIT_NEAR percent), by kind; a
+    window that has already reset counts for nothing."""
+    return {limit.get("kind"): limit for limit in limits
+            if limit["percent"] >= fx.LIMIT_NEAR and reset_minute(limit) * 60_000 > now_ms - 60_000}
+
+
 def status_of(info, readings, now_ms, tiers=fx.CONTEXT_TIERS):
     """Her status (effects.Status) from the session's figures: how far its
     context has grown past `tiers` (the aura setting), and whether the
-    5-hour or weekly limit is nearly used (LIMIT_NEAR percent, freshest of
-    every session's `readings`; a window that has already reset counts for
-    nothing)."""
+    5-hour or weekly limit is nearly used (freshest of every session's
+    `readings`, `near_limits`)."""
     ctx = info.get("context") if isinstance(info.get("context"), dict) else {}
-    near = set()
-    for limit in freshest_limits([info.get("limits")] + list(readings)):
-        if limit["percent"] >= fx.LIMIT_NEAR and reset_minute(limit) * 60_000 > now_ms - 60_000:
-            near.add(limit.get("kind"))
+    near = near_limits(freshest_limits([info.get("limits")] + list(readings)), now_ms)
     return fx.Status(fx.context_level(ctx.get("tokens"), tiers), "five_hour" in near, "seven_day" in near)
+
+
+# Her status on the card, by what it looks like on her (each character's
+# own take on it: Miku's failing stage light or Yunseul's guttering candles
+# dim, a hologram or a ghost fades) and what to do about the aura's tiers.
+AURA_ADVICE = {1: "(past {first})", 2: "· /compact soon", 3: "· /compact now"}
+STATUS_LOOKS = (("five_hour", "Dimming", "5h limit"), ("seven_day", "Fading", "weekly limit"))
+
+
+def status_lines(info, now_ms, tiers=fx.CONTEXT_TIERS):
+    """Why she looks as she does: a line per effect her status shows (the
+    same rules as `status_of`, `info`'s limits already the freshest)."""
+    ctx = info.get("context") if isinstance(info.get("context"), dict) else {}
+    lines = []
+    level = fx.context_level(ctx.get("tokens"), tiers)
+    if level:
+        advice = AURA_ADVICE[level].format(first=fmt_tokens(tiers[0]))
+        lines.append(f"Aura: {fmt_tokens(ctx['tokens'])} context {advice}")
+    limits = [limit for limit in info.get("limits") or []
+              if isinstance(limit, dict) and isinstance(limit.get("percent"), (int, float))]
+    near = near_limits(limits, now_ms)
+    for kind, look, name in STATUS_LOOKS:
+        if kind in near:  # when it resets is on its bar, just above
+            lines.append(f"{look}: {name} at {round(near[kind]['percent'])}%")
+    return lines
 
 
 def plural(n, word):
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def card_lines(mood, info, now_ms):
-    """The card as (title, rows), from what the mod wrote and the time now.
+def card_lines(mood, info, now_ms, tiers=fx.CONTEXT_TIERS):
+    """The card as (title, rows), from what the mod wrote and the time now
+    (`tiers`: the aura setting's, for the status lines).
 
     A row is a line of text, ("bar", name, percent, text) for a bar, or
     ("dim", text) for a quiet one.
@@ -699,6 +740,8 @@ def card_lines(mood, info, now_ms):
         pct = limit.get("percent") or 0
         reset = fmt_reset(limit.get("resetsAt"), now) if limit.get("resetsAt") else ""
         lines.append(("bar", name, pct, f"{round(pct):>3}%  {reset}".rstrip()))
+
+    lines += status_lines(info, now_ms, tiers)
 
     about = []
     if info.get("model"):
@@ -1133,6 +1176,29 @@ def shown_peers():
     return peers
 
 
+def peers_sent():
+    """(pid, sent at) of every other shown mascot whose session has sent a
+    message (courier.py): the live slot locks and their sessions' files."""
+    sent = []
+    try:
+        names = os.listdir(SLOTS_DIR)
+    except OSError:
+        return sent
+    for name in names:
+        if not re.fullmatch(r"\d+\.lock", name):
+            continue
+        holder = read_json(os.path.join(SLOTS_DIR, name))
+        if not holder or not isinstance(holder.get("key"), str) or not is_alive(holder.get("pid")):
+            continue
+        path = os.path.join(SESSIONS_DIR, f"{holder['key']}.json")
+        if os.path.normcase(path) == os.path.normcase(SESSION_PATH):
+            continue
+        state = peer_state(path)
+        if state and state.sent is not None:
+            sent.append((holder["pid"], state.sent))
+    return sent
+
+
 def others_limits():
     """The usage limits every other session's file holds."""
     try:
@@ -1352,8 +1418,14 @@ def run_window(parent, starter):
         "visited": first.visit[0] if first.visit else 0,
         "delivery": None,
         "noted": None,
+        # A message from another session (courier.py): the last word of one
+        # seen (epoch ms; one in the file at the start is old) and one
+        # waiting for its sender to be found, {at, seen (monotonic s)}.
+        "mailed": first.received or 0,
+        "mail": None,
     }
     calls = magic.Magic(root)
+    courier = Courier(root)
     presence = Presence()
     terminal = Terminal(parent)
     notes = Away()
@@ -1753,6 +1825,12 @@ def run_window(parent, starter):
                     if state["prefs"].remote and state["shown"] and state["act"] is None:
                         state["delivery"] = time.monotonic()
                         redraw()
+                if current.received and current.received != state["mailed"]:
+                    # Another session messaged this one: her messenger
+                    # fetches it from that session's mascot, once found.
+                    state["mailed"] = current.received
+                    if state["prefs"].messages and state["shown"]:
+                        state["mail"] = {"at": current.received, "seen": time.monotonic()}
                 if current.celebrate and current.celebrate[0] != state["celebrated"]:
                     # A newer version has loaded: her banner, once.
                     state["celebrated"] = current.celebrate[0]
@@ -1770,6 +1848,7 @@ def run_window(parent, starter):
                 leave(hide)
         follow_character()
         answer_call()
+        fetch_mail()
         chime()
         nudge()
         if not state["ending"]:
@@ -1840,6 +1919,35 @@ def run_window(parent, starter):
         calls.send(start, sprites or fx.build_sprites(HEIGHT), calm())
         cue("magic")
 
+    def fetch_mail():
+        """Flies her messenger from the mascot whose session sent the
+        message waiting (courier.py) to her, then brings it in. Only both
+        shown, with `messages` on, nobody away; its sender looked for until
+        WAIT_S (its file may land a moment after hers), else dropped."""
+        mail = state["mail"]
+        if mail is None:
+            return
+        able = (state["prefs"].messages and state["shown"] and state["act"] is None and not state["ending"]
+                and not presence.dark() and art.frames.get("idle"))
+        if not able or time.monotonic() - mail["seen"] > MAIL_WAIT_S:
+            state["mail"] = None
+            return
+        pid = sender_of(mail["at"], peers_sent())
+        rect = window_of(pid) if pid else None
+        if rect is None:
+            return  # not yet: looked for again at the next poll
+        state["mail"] = None
+        width, height = art.size()
+        start = messenger_spot(rect, HEIGHT)
+        target = (state["pos"]["x"] + fx.DELIVER_FROM[0] * width, state["pos"]["y"] + fx.DELIVER_FROM[1] * height)
+
+        def landed():
+            if state["shown"] and state["act"] is None:
+                state["delivery"] = time.monotonic()
+                redraw()
+
+        courier.send(start, target, HEIGHT, sprites, landed, calm())
+
     def draw_card():
         hover["refresh"] = None
         if not hover["shown"]:
@@ -1847,7 +1955,7 @@ def run_window(parent, starter):
         # The limits are the account's: another session may have read them since.
         limits = freshest_limits([state["info"].get("limits")] + others_limits())
         info = {**state["info"], "limits": limits}
-        title, lines = card_lines(state["mood"] or "idle", info, time.time() * 1000)
+        title, lines = card_lines(state["mood"] or "idle", info, time.time() * 1000, state["prefs"].aura or ())
         if state["noted"] is not None:
             hover["read"] = True
             lines = notes.lines() + [("dim", "")] + lines
@@ -2047,8 +2155,8 @@ def run_window(parent, starter):
         # second release right after it sent her back, leaves it alone.
         if state["drag"] and state["drag"]["moved"]:
             save_pos()
-        elif state["drag"] and state["prefs"].nudge:
-            terminal.come()  # a click: to her terminal
+        elif state["drag"]:
+            terminal.come()  # a click: to her terminal (looked up now if not yet)
         if state["carry"]:
             state["carry"].drop(time.monotonic())  # set down
         state["drag"] = None

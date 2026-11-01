@@ -54,14 +54,13 @@ A tag under her feet names the session's project (numbered, `app ·1`,
   from several sessions, and she is quiet while hidden or while your
   screen is off or locked (nothing she missed plays later).
 - She can tell you more, each off until you turn it on (`/mascot call`,
-  `remote`, `away`, or the settings window's Notifications page), each her
+  `remote`, `away`, `messages`, or the settings window's Notifications
+  page), each her
   own way: Miku's messenger is a little phone, Yunseul's a bat carrying a
   letter sealed in crimson wax.
   - Call me: once she has waited on you as long as her waiting sound
     waits (30 seconds), her messenger calls by her head and her terminal's
-    button blinks in the taskbar until you bring it forward. A click on her
-    brings her terminal's window forward (Windows Terminal keeps several
-    sessions in one window, on the tab you left it at).
+    button blinks in the taskbar until you bring it forward.
   - Remote Control: a prompt you send from the Claude app on your phone,
     from the web, or from a chat a channel relays comes in with her
     messenger.
@@ -70,6 +69,10 @@ A tag under her feet names the session's project (numbered, `app ·1`,
     happens (work done, a turn that failed, waiting on you, prompts a chat
     sent in). Back at your PC, she holds the note at her feet; hover her
     and the card shows it, then she puts it away.
+  - Between sessions: when Claude in one session sends another a message
+    (the SendMessage tool), the receiving mascot's messenger flies it over
+    from the sending session's mascot, then brings it in. Only when both
+    are shown.
   - Like her sounds, none of it plays while she is hidden.
 - `/mascot settings` opens the settings window; the other settings commands
   are below.
@@ -93,7 +96,10 @@ A tag under her feet names the session's project (numbered, `app ·1`,
   one before, wherever you dragged that one, on to your other displays when a
   display is full. Drag one to move it, to any display (each spot remembers
   where it was dragged, and a spot on a display you unplug comes back with
-  it); double-click sends it back to its spot; right-click hides it.
+  it); a click brings its session's terminal forward (in Windows
+  Terminal, its tab too); double-click sends it back to its spot; right-click hides it in
+  that session alone (`/mascot hide` and `/mascot show` also set what new
+  sessions start with).
 - Picked up, she says "!" and rides a little ring of light, shy in her held
   pose, legs dangling; she swings from
   where you hold her, leaning back as you move her and swaying when you
@@ -140,9 +146,10 @@ in `~/.claude/mascot/settings.json`, which holds only what you changed.
 | `/mascot sound wait [SECONDS\|default]` | How long she waits on you before her waiting sound (30; 10 to 300). |
 | `/mascot sound MOMENT [on\|off\|default\|FILE]` | What a moment plays: `waiting`, `done`, `beam`, `error`, `magic`, `intro` or `outro`. `default` is her own sound; `FILE` is the name of a `.wav` or `.mp3` of yours in `~/.claude/mascot/sounds/` (up to 8 seconds). Waiting, done, beam and error play hers by default; the rest nothing. |
 | `/mascot sound try MOMENT` | Plays a moment's sound now, to hear it. |
-| `/mascot call [on\|off]` | Call me: once she has waited on you as long as her waiting sound waits, her messenger calls and her terminal blinks in the taskbar; a click on her brings her terminal forward. Off by default. |
+| `/mascot call [on\|off]` | Call me: once she has waited on you as long as her waiting sound waits, her messenger calls and her terminal blinks in the taskbar. Off by default. |
 | `/mascot remote [on\|off]` | Prompts sent from Remote Control (your phone, the web) or a chat come in with her messenger. Off by default. |
 | `/mascot away [on\|off]` | Away notes: what happened while you were away, on a note she holds when you are back. Off by default. |
+| `/mascot messages [on\|off]` | Between sessions: a message one session sends another flies between their mascots, both shown. Off by default. |
 | `/mascot reset` | Every setting back to its default. |
 
 With no value, each command says what the setting is now. The file can be

@@ -31,12 +31,15 @@ one, so a slip in the file never breaks a mascot:
     waitingAfter   seconds she waits on you before her waiting sound,
                    WAITING_RANGE (30)
     nudge          once she has waited on you that long, her messenger
-                   calls and her terminal's taskbar button flashes; a
-                   click on her brings her terminal forward (false)
+                   calls and her terminal's taskbar button flashes
+                   (false; a click on her brings her terminal forward
+                   either way)
     remote         her messenger brings in a prompt sent from Remote
                    Control (a phone, the web) or a chat (false)
     away           what happened while you were away, on a note she holds
                    once you are back (false)
+    messages       a message one session sends another flies between
+                   their mascots, both shown (false)
 
 The mod (hooks/register.tsx) checks the same keys by the same rules.
 """
@@ -58,11 +61,11 @@ SOUNDS = {"waiting": True, "done": True, "beam": True, "error": True, "magic": F
 SOUND_FILE = re.compile(r'^[^\\/:*?"<>|\x00-\x1f]{1,120}\.(wav|mp3)$', re.IGNORECASE)
 
 Settings = namedtuple("Settings", "size calm smooth aura beamAfter beamForAgents magicAfter checkUpdates "
-                                  "sound volume sounds waitingAfter nudge remote away")
+                                  "sound volume sounds waitingAfter nudge remote away messages")
 DEFAULTS = Settings(size=420, calm=False, smooth=False, aura=(300_000, 400_000, 500_000), beamAfter=2,
                     beamForAgents=True, magicAfter=False, checkUpdates=False,
                     sound=False, volume=60, sounds=dict(SOUNDS), waitingAfter=30,
-                    nudge=False, remote=False, away=False)
+                    nudge=False, remote=False, away=False, messages=False)
 
 SIZE_RANGE = (240, 640)
 SIZES = {"small": 300, "normal": 420, "large": 560}
@@ -81,7 +84,7 @@ def check(key, value):
     """`value` as the setting `key` takes it, or None when it is not a valid one."""
     if key == "size":
         return round(value) if _number(value, *SIZE_RANGE) else None
-    if key in ("calm", "smooth", "beamForAgents", "checkUpdates", "sound", "nudge", "remote", "away"):
+    if key in ("calm", "smooth", "beamForAgents", "checkUpdates", "sound", "nudge", "remote", "away", "messages"):
         return value if isinstance(value, bool) else None
     if key == "aura":
         if value is False:

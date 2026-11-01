@@ -583,12 +583,12 @@ class Notifications(unittest.TestCase):
 
     def test_each_is_off_until_turned_on(self):
         self.app.show_page("notify")
-        for key in ("nudge", "remote", "away"):
+        for key in ("nudge", "remote", "away", "messages"):
             self.assertFalse(getattr(self.app.prefs, key))
             click(self.app, self.switch(key))
-        self.assertEqual(saved(self.app), {"nudge": True, "remote": True, "away": True})
+        self.assertEqual(saved(self.app), {"nudge": True, "remote": True, "away": True, "messages": True})
         click(self.app, self.switch("remote"))
-        self.assertEqual(saved(self.app), {"nudge": True, "away": True})
+        self.assertEqual(saved(self.app), {"nudge": True, "away": True, "messages": True})
 
     def test_the_call_says_how_long_she_waits(self):
         self.app.show_page("notify")

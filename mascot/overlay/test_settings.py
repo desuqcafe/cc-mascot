@@ -30,16 +30,17 @@ class Load(unittest.TestCase):
     def test_no_file_is_todays_behaviour(self):
         self.assertEqual(cfg.load(a_file()), cfg.DEFAULTS)
         self.assertEqual(cfg.DEFAULTS, (420, False, False, (300_000, 400_000, 500_000), 2, True, False, False,
-                                        False, 60, cfg.SOUNDS, 30, False, False, False))
+                                        False, 60, cfg.SOUNDS, 30, False, False, False, False))
 
     def test_it_reads_what_was_set(self):
         path = a_file({"size": 560, "calm": True, "smooth": True, "aura": [200_000, 250_000, 900_000], "beamAfter": 10,
                        "beamForAgents": False, "magicAfter": 3, "checkUpdates": True, "sound": True, "volume": 35,
                        "sounds": {"magic": True, "done": "ding.mp3"}, "waitingAfter": 90,
-                       "nudge": True, "remote": True, "away": True})
+                       "nudge": True, "remote": True, "away": True, "messages": True})
         self.assertEqual(cfg.load(path), (560, True, True, (200_000, 250_000, 900_000), 10, False, 3, True, True, 35,
-                                          {**cfg.SOUNDS, "magic": True, "done": "ding.mp3"}, 90, True, True, True))
-        self.assertEqual(cfg.load(a_file({"nudge": 1, "remote": "on", "away": None}))[-3:], (False, False, False))
+                                          {**cfg.SOUNDS, "magic": True, "done": "ding.mp3"}, 90, True, True, True, True))
+        self.assertEqual(cfg.load(a_file({"nudge": 1, "remote": "on", "away": None, "messages": "yes"}))[-4:],
+                         (False, False, False, False))
         self.assertEqual(cfg.load(a_file({"checkUpdates": "yes"})).checkUpdates, False)
         self.assertEqual(cfg.load(a_file({"aura": False, "beamAfter": False})).aura, False)
         self.assertEqual(cfg.load(a_file({"aura": False, "beamAfter": False})).beamAfter, False)

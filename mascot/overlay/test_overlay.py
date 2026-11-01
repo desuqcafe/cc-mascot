@@ -350,6 +350,27 @@ class Card(unittest.TestCase):
             ],
         )
 
+    def test_her_status_is_explained_under_the_bars(self):
+        soon, gone = "2026-10-02T16:40:00.000Z", "2026-10-02T15:00:00.000Z"
+        now = datetime.datetime(2026, 10, 2, 16, 10, tzinfo=datetime.timezone.utc).timestamp() * 1000
+        lines = overlay.status_lines
+        ctx = lambda tokens: {"context": {"tokens": tokens}}
+        self.assertEqual(lines(ctx(299_000), now), [])
+        self.assertEqual(lines(ctx(312_000), now), ["Aura: 312k context (past 300k)"])
+        self.assertEqual(lines(ctx(412_000), now), ["Aura: 412k context · /compact soon"])
+        self.assertEqual(lines(ctx(512_000), now), ["Aura: 512k context · /compact now"])
+        self.assertEqual(lines(ctx(512_000), now, ()), [])  # the aura is off
+        self.assertEqual(lines(ctx(150_000), now, (100_000, 200_000, 300_000)), ["Aura: 150k context (past 100k)"])
+        limits = {"limits": [{"kind": "five_hour", "percent": 93.4, "resetsAt": soon},
+                             {"kind": "seven_day", "percent": 91, "resetsAt": soon}]}
+        self.assertEqual(lines(limits, now), ["Dimming: 5h limit at 93%", "Fading: weekly limit at 91%"])
+        self.assertEqual(lines({"limits": [{"kind": "five_hour", "percent": 95, "resetsAt": gone},
+                                           {"kind": "seven_day", "percent": 89, "resetsAt": soon}]}, now), [])
+        # On the card: under the bars, above the rest.
+        _title, card = overlay.card_lines("idle", {**ctx(412_000), **limits}, now)
+        self.assertEqual([row[0] for row in card[:3]], ["bar"] * 3)  # context, 5h, weekly
+        self.assertEqual(card[3:5], ["Aura: 412k context · /compact soon", "Dimming: 5h limit at 93%"])
+
     def test_nothing_written_yet(self):
         title, lines = overlay.card_lines("idle", {}, NOW_MS)
         self.assertEqual((title, lines), ("Claude Code", ["Now: idle"]))
@@ -417,11 +438,11 @@ class SessionFile(unittest.TestCase):
 
     def test_reads_frame_info_and_visibility(self):
         write(overlay.SESSION_PATH, {"frame": "waiting", "info": {"tool": "Bash"}, "visible": False, "visibleAt": 5})
-        self.assertEqual(overlay.read_state(), ("waiting", {"tool": "Bash"}, (False, 5), False, 0, None, None, None, None, None))
+        self.assertEqual(overlay.read_state(), ("waiting", {"tool": "Bash"}, (False, 5), False, 0, None, None, None, None, None, None, None))
 
     def test_an_unknown_frame_is_idle_and_no_choice_is_none(self):
         write(overlay.SESSION_PATH, {"frame": "dancing"})
-        self.assertEqual(overlay.read_state(), ("idle", {}, None, False, 0, None, None, None, None, None))
+        self.assertEqual(overlay.read_state(), ("idle", {}, None, False, 0, None, None, None, None, None, None, None))
 
     def test_a_call_to_the_pointer(self):
         write(overlay.SESSION_PATH, {"frame": "happy", "call": {"at": 12}})
@@ -487,6 +508,25 @@ class SessionFile(unittest.TestCase):
         os.remove(path)
         self.assertIsNone(overlay.peer_state(path))
         self.assertNotIn(path, overlay._peers)
+
+    def test_messages_between_sessions_are_read(self):
+        write(overlay.SESSION_PATH, {"frame": "idle", "sent": {"at": 5}, "received": {"at": 7, "from": "peer-a-fc"}})
+        self.assertEqual((overlay.read_state().sent, overlay.read_state().received), (5, 7))
+        write(overlay.SESSION_PATH, {"frame": "idle", "sent": {"at": True}, "received": "soon"})
+        self.assertEqual((overlay.read_state().sent, overlay.read_state().received), (None, None))
+
+    def test_other_shown_mascots_that_sent_a_message(self):
+        os.makedirs(overlay.SLOTS_DIR, exist_ok=True)
+        alive = os.getpid()
+        write(os.path.join(overlay.SLOTS_DIR, "0.lock"), {"pid": alive, "key": "me"})  # her own
+        write(os.path.join(overlay.SLOTS_DIR, "1.lock"), {"pid": alive, "key": "b"})
+        write(os.path.join(overlay.SLOTS_DIR, "2.lock"), {"pid": 999_999_99, "key": "c"})  # gone
+        write(os.path.join(overlay.SLOTS_DIR, "3.lock"), {"pid": alive, "key": "d"})  # sent nothing
+        write(os.path.join(overlay.SLOTS_DIR, "session-b.lock"), {"pid": alive, "key": "b"})  # not a spot
+        for key in ("me", "b", "c"):
+            write(os.path.join(overlay.SESSIONS_DIR, f"{key}.json"), {"frame": "idle", "sent": {"at": 100}})
+        write(os.path.join(overlay.SESSIONS_DIR, "d.json"), {"frame": "idle"})
+        self.assertEqual(overlay.peers_sent(), [(alive, 100)])
 
     def test_a_clear_is_a_number(self):
         write(overlay.SESSION_PATH, {"frame": "idle", "cleared": 1234})

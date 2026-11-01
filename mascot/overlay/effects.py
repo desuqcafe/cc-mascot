@@ -1370,8 +1370,9 @@ def delivered(w, h, t, age, calm=False):
     x1, y1 = CALL_AT[0] * w, CALL_AT[1] * h
     fly = min(1.0, age / DELIVER_IN_S)
     e = 1 - (1 - fly) ** 3
-    x = -0.12 * w + (x1 + 0.12 * w) * e
-    y = -0.1 * h + (y1 + 0.1 * h) * e - 0.06 * h * math.sin(math.pi * fly)
+    x0, y0 = DELIVER_FROM[0] * w, DELIVER_FROM[1] * h
+    x = x0 + (x1 - x0) * e
+    y = y0 + (y1 - y0) * e - 0.06 * h * math.sin(math.pi * fly)
     fade = min(1.0, (DELIVER_S - age) / 0.35)
     draws = []
     for start in DELIVER_RINGS:
@@ -1393,6 +1394,61 @@ def delivered(w, h, t, age, calm=False):
                                   for s in DELIVER_RINGS if s <= age < s + CALL_RING_S)
     draws.append(Draw("messenger", x, y, pop(age, 0, 0.3), fade, -8 + shake))
     return draws
+
+
+# A message between sessions (the `messages` setting): the receiving
+# mascot's messenger flies over from the sending one's messenger spot
+# (`CALL_AT`) to where `delivered` starts its swoop (DELIVER_FROM: up and
+# left of her), along magic's arc, in a window of its own (courier.py); there
+# `delivered` takes over, the flight fading out as it pops in.
+DELIVER_FROM = (-0.12, -0.1)
+COURIER_SPEED = 1400  # px/s past its shortest flight
+COURIER_FLIGHT_S = (0.7, 1.6)
+COURIER_HANDOFF_S = 0.2  # it fades out this long as `delivered` pops in
+COURIER_TRAIL = 4
+COURIER_TRAIL_S = 0.03
+
+
+def courier_flight(start, target):
+    """How long the messenger takes from `start` to `target` (desktop px)."""
+    low, high = COURIER_FLIGHT_S
+    return min(high, low + math.dist(start, target) / COURIER_SPEED)
+
+
+def courier_head(start, target, flight, age):
+    """Where the messenger is (desktop px), `age` s along its flight."""
+    p = min(1.0, max(0.0, age / flight))
+    return _arc(start, target, p * p * (3 - 2 * p))
+
+
+def courier(start, target, flight, age, t, h, calm=False):
+    """[Draw] of the messenger `age` s along its flight, around its head
+    (the middle of its window); `h` her height (the sprites' scale)."""
+    if not 0 <= age < flight:
+        return []
+    hx, hy = courier_head(start, target, flight, age)
+    grow = pop(age, 0, 0.3)
+    fade = min(1.0, (flight - age) / COURIER_HANDOFF_S)
+    # It leans into the way it goes.
+    nx, ny = courier_head(start, target, flight, min(flight, age + 0.03))
+    tilt = max(-25.0, min(25.0, (nx - hx) * 0.6))
+    draws = []
+    if not calm:
+        for i in range(1, COURIER_TRAIL + 1):
+            back = age - COURIER_TRAIL_S * i
+            if back < 0:
+                break
+            x, y = courier_head(start, target, flight, back)
+            draws.append(Draw("spark_accent" if i % 2 else "spark_main", x - hx, y - hy,
+                              0.9 - 0.15 * i, fade * (0.8 - 0.15 * i), 40 * i + 200 * t))
+    return draws + carried(0.0, 0.0, h, t, tilt, grow, fade)
+
+
+def carried(x, y, h, t, tilt, grow, alpha=1.0):
+    """[Draw] of her messenger in flight at (x, y), leaning `tilt` degrees."""
+    if STYLE:
+        return STYLE.carried(x, y, h, t, tilt, grow, alpha)
+    return [Draw("messenger", x, y + 2 * math.sin(t * 9), grow, alpha, -8 + tilt + 6 * math.sin(t * 14))]
 
 
 def noted(w, h, t, age, calm=False):

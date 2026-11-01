@@ -714,8 +714,9 @@ def delivered(w, h, t, age, calm=False):
     if age < drop:
         fly = min(1.0, age / fx.DELIVER_IN_S)
         e = 1 - (1 - fly) ** 3
-        x = -0.12 * w + (x1 + 0.12 * w) * e
-        y = -0.1 * h + (y1 + 0.1 * h) * e + 0.05 * h * math.sin(math.pi * fly)
+        x0, y0 = fx.DELIVER_FROM[0] * w, fx.DELIVER_FROM[1] * h
+        x = x0 + (x1 - x0) * e
+        y = y0 + (y1 - y0) * e + 0.05 * h * math.sin(math.pi * fly)
         draws += _messenger(x, y + 2 * math.sin(t * 3), h, t, 10 * math.sin(age * 9), pop(age, 0, 0.3), hz=8.0)
         return draws
     q = (age - drop) / (fx.DELIVER_S - drop)
@@ -734,6 +735,11 @@ def delivered(w, h, t, age, calm=False):
             draws.append(Draw("spark_accent" if i % 2 else "spark_main", x1 + 0.05 * w * p * math.cos(a),
                               y1 + 0.05 * h + 0.05 * w * p * math.sin(a), 1.1 * (1 - p), 1 - p, 90 * p))
     return draws
+
+
+def carried(x, y, h, t, tilt, grow, alpha=1.0):
+    """The bat flying its letter between sessions, wings beating fast."""
+    return _messenger(x, y + 2 * math.sin(t * 3), h, t, 0.6 * tilt + 8 * math.sin(t * 9), grow, alpha, hz=8.0)
 
 
 def noted(w, h, t, age, calm=False):

@@ -1,4 +1,13 @@
 {
+  "0.20.0": [
+    "Between sessions: when Claude in one session messages another, her messenger flies it over from one mascot to the other. Turn it on in the settings window's Notifications page or with /mascot messages on.",
+    "Click her to bring her terminal forward, on her own session's tab, with Call me off too.",
+    "Her card says why she glows, dims or fades: how much context the aura stands for (and when to /compact), and which usage limit is nearly used.",
+    {
+      "text": "A right-click hides her in that session only: new sessions still bring her, and /mascot show brings her back. Before, one right-click kept her hidden in every new session.",
+      "kind": "fix"
+    }
+  ],
   "0.19.0": [
     "She can tell you more, each off until you turn it on in the settings window's Notifications page: her messenger calls and her terminal blinks in the taskbar when she has waited on you, and a click on her brings her terminal forward.",
     "Prompts you send from the Claude app on your phone, the web or a chat come in with her messenger.",

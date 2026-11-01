@@ -5,6 +5,7 @@ import type {
   MascotCall,
   MascotCue,
   MascotFrame,
+  MascotMail,
   MascotMoment,
   MascotMood,
   MascotSessionFile,
@@ -139,6 +140,7 @@ const DEFAULTS: Settings = {
   nudge: false,
   remote: false,
   away: false,
+  messages: false,
 }
 const SIZE_RANGE = [240, 640] as const
 const SIZES: Record<string, number> = { small: 300, normal: 420, large: 560 }
@@ -188,6 +190,7 @@ const checks: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   nudge: v => (typeof v === 'boolean' ? v : undefined),
   remote: v => (typeof v === 'boolean' ? v : undefined),
   away: v => (typeof v === 'boolean' ? v : undefined),
+  messages: v => (typeof v === 'boolean' ? v : undefined),
 }
 
 const viewState = atom({ plugin: 'mascot', key: 'view' } as const, { visible: false, at: 0 } as MascotVisibility)
@@ -220,6 +223,12 @@ let cue: MascotCue | undefined
 // The last prompt that came from elsewhere (Remote Control, a channel): the
 // overlay shows it come in when the `remote` setting says so.
 let visit: MascotVisit | undefined
+// The last message this session sent another, and the last one another
+// session sent this one: with the `messages` setting on and both mascots
+// shown, the receiving overlay pairs the two by time and flies her
+// messenger between them (the engine names neither session to the other).
+let sent: MascotMail | undefined
+let received: MascotMail | undefined
 // The character the overlay shows: a new one (/mascot character) makes it
 // play its outro, take on the new art and play its intro, on the same spot.
 let characterNow: string | undefined
@@ -331,6 +340,7 @@ const loadSettings = async ($: EngineInterface): Promise<Settings> => {
     nudge: pick('nudge'),
     remote: pick('remote'),
     away: pick('away'),
+    messages: pick('messages'),
   }
 }
 
@@ -366,6 +376,18 @@ const sessionFile = async ($: EngineInterface) => {
   return `${dir}/sessions/${sessionKey}.json`
 }
 
+// Whom a delivery came from when another session's model sent it to this
+// conversation: the name its envelope gives ('' when it gives none);
+// undefined for anything else (a teammate, a message for an agent, a relay).
+// Seen live (2.1.316): `<cross-session-message from="uds:..."
+// from-name="peer-a-fc" from-mode="prompting">`, origin `{ kind: 'peer' }`.
+const fromSession = (e: { origin: { kind: string }; text: string; agentId?: string }): string | undefined => {
+  if (e.origin.kind !== 'peer' || 'teammate' in e.origin || e.agentId !== undefined) return undefined
+  const envelope = /^\s*<cross-session-message\b([^>]*)>/.exec(e.text)
+  if (!envelope) return undefined
+  return /\bfrom-name="([^"]{1,80})"/.exec(envelope[1]!)?.[1] ?? ''
+}
+
 const writeFile = async ($: EngineInterface) => {
   if (isEnded) return
   try {
@@ -381,6 +403,8 @@ const writeFile = async ($: EngineInterface) => {
       call,
       cue,
       visit,
+      sent,
+      received,
     }
     if (path) await $.fs.write(path, JSON.stringify(file))
   } catch {
@@ -830,7 +854,13 @@ const startOverlay = async ($: EngineInterface): Promise<string | undefined> => 
         pending += text
         const lines = pending.split('\n')
         pending = lines.pop() ?? ''
-        for (const line of lines) if (line.trim() === 'hidden') await setVisible($, false)
+        for (const line of lines) {
+          if (line.trim() !== 'hidden') continue
+          // A right-click hides this session's alone: the next sessions
+          // still start as /mascot show|hide last chose.
+          await setVisible($, false, false)
+          $.ui.toast('Mascot hidden for this session: /mascot show brings it back.')
+        }
       }
     } catch (err) {
       failure = String(err)
@@ -896,13 +926,14 @@ const openSettingsWindow = async ($: EngineInterface): Promise<string | undefine
   return undefined
 }
 
-// Shows or hides this session's mascot, and makes that the default for the
-// sessions that start next.
-const setVisible = async ($: EngineInterface, visible: boolean) => {
+// Shows or hides this session's mascot and, when `remember`d (a /mascot
+// show|hide, not a right-click), makes that the default for the sessions that
+// start next.
+const setVisible = async ($: EngineInterface, visible: boolean, remember = true) => {
   view = { visible, at: await $.clock.now() }
   await update($, viewState, () => view).catch(() => {})
   await writeFile($)
-  await $.store.set(OVERLAY_KEY, visible).catch(() => {})
+  if (remember) await $.store.set(OVERLAY_KEY, visible).catch(() => {})
   return visible ? startOverlay($) : undefined
 }
 
@@ -1080,12 +1111,16 @@ const describe = {
   waitingAfter: (s: Settings) => `Her waiting sound after ${s.waitingAfter} s of waiting on you.`,
   nudge: (s: Settings) =>
     s.nudge
-      ? `Call me on: after ${s.waitingAfter} s of waiting on you, she calls and her terminal blinks in the taskbar; click her to bring it forward.`
+      ? `Call me on: after ${s.waitingAfter} s of waiting on you, she calls and her terminal blinks in the taskbar.`
       : 'Call me off.',
   remote: (s: Settings) =>
     s.remote ? 'Remote on: she shows prompts sent from your phone, the web or a chat.' : 'Remote off.',
   away: (s: Settings) =>
     s.away ? 'Away notes on: back at your PC, she holds a note of what happened.' : 'Away notes off.',
+  messages: (s: Settings) =>
+    s.messages
+      ? 'Messages on: when one session messages another, her messenger flies between their mascots.'
+      : 'Messages off.',
 }
 
 const settingsSummary = (s: Settings) => Object.values(describe).map(line => line(s)).join(' ')
@@ -1157,8 +1192,13 @@ const settingsCommand = async ($: EngineInterface, words: string[], raw: string[
     return answer
   }
   if (verb === 'sound') return soundCommand($, rest, raw.slice(1), set)
-  // On or off: /mascot call (the `nudge` setting), remote, away.
-  const switches: Record<string, 'nudge' | 'remote' | 'away'> = { call: 'nudge', remote: 'remote', away: 'away' }
+  // On or off: /mascot call (the `nudge` setting), remote, away, messages.
+  const switches: Record<string, 'nudge' | 'remote' | 'away' | 'messages'> = {
+    call: 'nudge',
+    remote: 'remote',
+    away: 'away',
+    messages: 'messages',
+  }
   const key = verb !== undefined && Object.hasOwn(switches, verb) ? switches[verb] : undefined
   if (verb !== undefined && key && !extra) {
     if (!value) return `${await now(key)} /mascot ${verb} on|off.`
@@ -1186,6 +1226,7 @@ const settingsCommand = async ($: EngineInterface, words: string[], raw: string[
       nudge: null,
       remote: null,
       away: null,
+      messages: null,
     })
     return `Settings back to their defaults. ${settingsSummary(DEFAULTS)}`
   }
@@ -1280,7 +1321,7 @@ export const register: Register = on => {
       description:
         "Show or hide this session's mascot (or every session's), pick its character, fire her beam, send magic to your pointer, update her, see what is new, or change her settings and sounds",
       argumentHint:
-        '[show|hide] [all] | character [name] | beam | magic | update | news [all] | settings | size | calm | smooth | aura | beam after | magic after | updates | sound | call | remote | away | reset',
+        '[show|hide] [all] | character [name] | beam | magic | update | news [all] | settings | size | calm | smooth | aura | beam after | magic after | updates | sound | call | remote | away | messages | reset',
       immediate: true,
     })
     // A reload keeps this session's choice; a new session takes the last one
@@ -1311,7 +1352,7 @@ export const register: Register = on => {
       'Settings, for every mascot: /mascot settings; size [small|normal|large|<px>]; calm [on|off]; smooth [on|off]; ' +
       'aura [<3 token counts>|off]; beam after [<minutes>|never]; beam agents [on|off]; ' +
       'magic after [<minutes>|never]; updates [on|off]; ' +
-      'sound [on|off|volume|wait|<moment>|try]; call [on|off]; remote [on|off]; away [on|off]; reset.'
+      'sound [on|off|volume|wait|<moment>|try]; call [on|off]; remote [on|off]; away [on|off]; messages [on|off]; reset.'
     try {
       const answer = await settingsCommand($, words, e.args.trim().split(/\s+/).filter(Boolean))
       if (answer !== undefined) return { text: answer }
@@ -1387,6 +1428,35 @@ export const register: Register = on => {
       if (origin?.kind === 'bridge' || origin?.kind === 'channel') {
         const at = await $.clock.now()
         visit = origin.kind === 'channel' ? { at, from: 'channel', name: origin.server } : { at, from: 'bridge' }
+        await writeFile($)
+      }
+    } catch {
+      // A mascot never gets in the way of the session.
+    }
+    return next(e)
+  })
+
+  // A message between sessions (the SendMessage tool): the sender's side
+  // once it is delivered, the receiver's as it arrives (a few ms apart). Only
+  // a shown mascot with `messages` on says so; nothing else of it is kept.
+  on('session.send', async ($, e, next) => {
+    const result = await next(e)
+    try {
+      if (result.isDelivered && view.visible && (await loadSettings($)).messages) {
+        sent = { at: await $.clock.now() }
+        await writeFile($)
+      }
+    } catch {
+      // A mascot never gets in the way of the session.
+    }
+    return result
+  })
+
+  on('session.receive', async ($, e, next) => {
+    try {
+      const from = fromSession(e)
+      if (from !== undefined && view.visible && (await loadSettings($)).messages) {
+        received = { at: await $.clock.now(), ...(from ? { from } : {}) }
         await writeFile($)
       }
     } catch {

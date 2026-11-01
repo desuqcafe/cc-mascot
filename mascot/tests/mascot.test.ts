@@ -771,10 +771,16 @@ test('/mascot magic and the settings window send a test call to the pointer', as
   expect((await mascot($, 'magic now')).text).toContain('Usage: /mascot')
 })
 
-test('a right-click on the overlay hides it for the mod too', async ($, on) => {
+test('a right-click on the overlay hides it for this session alone', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000 })
   const disk = sessionFiles(on)
   const proc = overlayProcess(on)
+  const kept = store(on)
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
 
   await mascot($, 'show')
   await clock.advance(5_000)
@@ -782,6 +788,8 @@ test('a right-click on the overlay hides it for the mod too', async ($, on) => {
   proc.say('den\n') // a line may come in pieces
   await clock.advance(10)
   expect(disk.last()).toMatchObject({ visible: false, visibleAt: 6_000 })
+  expect(kept.get('isOverlayOn')).toBe(true) // the next session still starts shown
+  expect(toasts).toEqual(['Mascot hidden for this session: /mascot show brings it back.'])
   // The next /mascot shows it again.
   expect((await mascot($)).text).toContain('Mascot shown')
 })
@@ -1203,6 +1211,58 @@ test('a prompt from Remote Control or a channel is written for the overlay; a ty
   expect(disk.last()!.visit).toEqual({ at: 7_000, from: 'bridge' })
   await $.prompt.submit({ text: 'from a chat', wait: false, origin: { kind: 'channel', server: 'telegram' } })
   expect(disk.last()!.visit).toEqual({ at: 7_000, from: 'channel', name: 'telegram' })
+})
+
+// ---- messages between sessions
+
+const ENVELOPE = (name: string, text: string) =>
+  `<cross-session-message from="uds:\\\\.\\pipe\\LOCAL\\cc-msg-03bb" from-name="${name}" from-mode="prompting">\n${text}\n</cross-session-message>`
+
+test('a message between sessions is written down while she is shown and messages is on', async ($, on) => {
+  const clock = mock.clock(on, { now: 9_000 })
+  const disk = sessionFiles(on, { messages: true })
+  overlayProcess(on)
+  let delivered = true
+  on('session.send', () => (delivered ? { isDelivered: true as const } : { isDelivered: false as const, reason: 'gone' }))
+  on('session.receive', (_$, e) => ({ text: e.text }))
+  const send = () => $.session.send({ to: 'peer-b-93', text: 'hello', origin: { kind: 'model' } })
+  const receive = (e: Parameters<typeof $.session.receive>[0]) => $.session.receive(e)
+
+  await send() // hidden: nothing
+  expect(disk.last()?.sent).toBeUndefined()
+
+  await mascot($, 'show')
+  await send()
+  expect(disk.last()!.sent).toEqual({ at: 9_000 })
+  await clock.advance(1_000)
+  delivered = false
+  await send() // not delivered: not sent
+  expect(disk.last()!.sent).toEqual({ at: 9_000 })
+
+  await receive({ origin: { kind: 'peer' }, text: ENVELOPE('peer-a-fc', 'hi') })
+  expect(disk.last()!.received).toEqual({ at: 10_000, from: 'peer-a-fc' })
+  await clock.advance(1_000)
+  // Not from another session's model: a relay, a teammate, a message for an agent.
+  await receive({ origin: { kind: 'task-notification' }, text: ENVELOPE('x', 'hi') })
+  await receive({ origin: { kind: 'peer', teammate: 'researcher', isVerified: true }, text: ENVELOPE('x', 'hi') })
+  await receive({ origin: { kind: 'peer' }, text: ENVELOPE('x', 'hi'), agentId: 'a1' })
+  await receive({ origin: { kind: 'peer' }, text: 'plain words' })
+  expect(disk.last()!.received).toEqual({ at: 10_000, from: 'peer-a-fc' })
+})
+
+test('messages off writes nothing of them', async ($, on) => {
+  mock.clock(on, { now: 9_000 })
+  const disk = sessionFiles(on)
+  overlayProcess(on)
+  on('session.send', () => ({ isDelivered: true as const }))
+  on('session.receive', (_$, e) => ({ text: e.text }))
+  await mascot($, 'show')
+  await $.session.send({ to: 'peer-b-93', text: 'hello', origin: { kind: 'model' } })
+  await $.session.receive({ origin: { kind: 'peer' }, text: ENVELOPE('peer-a-fc', 'hi') })
+  expect(disk.files.some(f => f.sent || f.received)).toBe(false)
+  expect((await mascot($, 'messages')).text).toBe('Messages off. /mascot messages on|off.')
+  expect((await mascot($, 'messages on')).text).toContain('her messenger flies between their mascots')
+  expect(disk.settings()).toEqual({ messages: true })
 })
 
 test('/mascot call, remote and away turn each on or off; all off by default', async ($, on) => {

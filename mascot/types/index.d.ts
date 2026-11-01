@@ -47,8 +47,21 @@ export type MascotSessionFile = {
   call?: MascotCall
   cue?: MascotCue
   visit?: MascotVisit
+  sent?: MascotMail
+  received?: MascotMail
   ended?: true
 }
+
+/**
+ * A message between sessions (the SendMessage tool), written only while the
+ * mascot is shown and the `messages` setting is on: `sent` when this session
+ * delivered one to another, `received` when another's arrived here (`from`
+ * the name its envelope gives, as ListAgents lists it). The engine names
+ * neither session to the other, so the receiving overlay pairs a `received`
+ * with a shown peer's `sent` a moment apart and flies her messenger from
+ * that mascot to her, once per new `at` (epoch ms).
+ */
+export type MascotMail = { at: number; from?: string }
 
 /**
  * A prompt that came from elsewhere (`at`, epoch ms): `from` 'bridge' (Remote
@@ -120,10 +133,11 @@ export type MascotUpdate = {
  * (waiting, done, beam and error her own, the rest none); `waitingAfter`
  * the seconds she waits on you before her waiting sound (10-300, 30);
  * `nudge` once she has waited that long, her messenger calls and her
- * terminal's taskbar button flashes, and a click on her brings her
- * terminal forward (false); `remote` her messenger brings in a prompt from
+ * terminal's taskbar button flashes (false; a click on her brings her
+ * terminal forward either way); `remote` her messenger brings in a prompt from
  * Remote Control or a channel (false); `away` what happened while you were away, on a note
- * she holds when you are back (false).
+ * she holds when you are back (false); `messages` a message one session
+ * sends another flies between their mascots, both shown (false).
  */
 export type MascotSettings = {
   size?: number
@@ -141,6 +155,7 @@ export type MascotSettings = {
   nudge?: boolean
   remote?: boolean
   away?: boolean
+  messages?: boolean
 }
 
 declare module 'claude-code' {

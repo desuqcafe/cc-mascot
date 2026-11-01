@@ -113,28 +113,30 @@ and two mascots never talk over each other.
 
 ### She lets you know
 
-Three more ways she tells you what is going on, each off until you turn it
+Four more ways she tells you what is going on, each off until you turn it
 on in the settings window's Notifications page, and each in her own style:
 Miku's messenger is a little phone, Yunseul's a bat carrying a letter
 sealed in crimson wax.
 
 - **Call me**: when she has waited on you for 30 seconds, her messenger
-  calls and her terminal blinks in the taskbar. Click her to bring her
-  terminal forward.
+  calls and her terminal blinks in the taskbar.
 - **Remote Control**: a prompt you send from the Claude app on your phone,
   the web or a chat comes in with her messenger.
 - **Away notes**: step away, and she keeps a note of what happened (work
   done, a turn that failed, waiting on you). When you are back, she holds
   it at her feet; hover her to read it.
+- **Between sessions**: when Claude in one session sends a message to
+  another, her messenger flies it over from that session's mascot to hers
+  (both must be showing).
 
 ### Playing with her
 
 - **Drag** her anywhere, on any display. She goes shy, legs dangling, swings
   from where you hold her and lands with a little bounce. Each spot
   remembers where you put her.
-- **Click** her to bring her terminal forward (with Call me on).
+- **Click** her to bring her terminal forward, on her session's tab.
 - **Double-click** sends her back to her spot.
-- **Right-click** hides her.
+- **Right-click** hides her in that session (`/mascot show` brings her back).
 - Several sessions stand side by side, never on top of each other, each with
   a tag naming its project.
 

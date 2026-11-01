@@ -1476,7 +1476,8 @@ class App:
 
     def layout_notify(self, W, M, H, top):
         """The notifications page: her call when she waits on you, prompts
-        from elsewhere, her away note; each a switch and what it does."""
+        from elsewhere, her away note, messages between sessions; each a
+        switch and what it does."""
         t, u = self.theme, self.u
         fy = H - 14 - 32
         h = fy - 14 - top
@@ -1491,15 +1492,19 @@ class App:
         rows = (
             ("nudge", "Call me", lambda: (
                 f"When she has waited on you {self.prefs.waitingAfter} s, her messenger calls and",
-                "her terminal blinks in the taskbar. Click her to bring her terminal forward.")),
+                "her terminal blinks in the taskbar until you bring it forward.")),
             ("remote", "Remote Control", lambda: (
                 "A prompt you send from the Claude app on your phone, the web or a chat",
                 "comes in with her messenger.")),
             ("away", "While you were away", lambda: (
                 "Away 5 min or more, or the screen off: she keeps a note of what happened.",
                 "When you are back, hover her to read it.")),
+            ("messages", "Between sessions", lambda: (
+                "When one session sends another a message, her messenger flies it over",
+                "from that session's mascot to hers. Both must be shown.")),
         )
-        for (key, title, about), names in zip(rows, (("messenger",), ("messenger",), ("away_note",))):
+        pictured = (("messenger",), ("messenger",), ("away_note",), ("messenger",))
+        for (key, title, about), names in zip(rows, pictured):
             self.notify_row(key, title, about, x0, y, cw)
             # What it looks like, in her own style, at the row's right.
             right = (x0 + cw - 20) * u
@@ -1510,7 +1515,7 @@ class App:
                     right -= img.width + 4 * u
             y += NOTIFY_ROW
         self.add(Note(self, ((x0 * u), (y + 4) * u, cw * u, 40 * u), lambda: (
-            "Windows Terminal shows several sessions in one window: it comes forward on the tab you left it at."),
+            f"A click on {t.name} brings her terminal forward, on her own tab, whichever of these are on."),
             11.5 * u, lambda: t.muted, 18 * u))
         self.add(Label(self, ((M + 4) * u, fy * u, 400 * u, 32 * u), lambda: self.problem or "Quiet while she is hidden.",
                        "regular", 12 * u, lambda: t.accentDeep if self.problem else t.muted), "problem")

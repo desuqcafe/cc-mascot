@@ -75,17 +75,46 @@ class Terminal_(unittest.TestCase):
         finally:
             root.destroy()
 
-    def test_a_click_brings_it_forward(self):
+    def test_a_click_brings_it_forward_then_her_tab(self):
         root, hwnd = a_window()
         try:
-            term = Terminal(1, finder=lambda pid: hwnd)
+            tabs = []
+            term = Terminal(1, finder=lambda pid: hwnd, tabs=lambda pid, w: tabs.append((pid, w)))
             with mock.patch.object(terminal, "bring_forward", return_value=True) as come:
                 self.assertTrue(term.come())  # not known yet: looked for at once
                 self.assertTrue(term.come())
             self.assertEqual(come.call_args_list, [mock.call(hwnd)] * 2)
-            self.assertFalse(Terminal(1, finder=lambda pid: None).come())
+            for _ in range(100):
+                if len(tabs) == 2:
+                    break
+                time.sleep(0.01)
+            self.assertEqual(tabs, [(1, hwnd)] * 2)
+            self.assertFalse(Terminal(1, finder=lambda pid: None, tabs=lambda *a: self.fail("tab")).come())
         finally:
             root.destroy()
+
+
+class Tabs(unittest.TestCase):
+    def test_a_title_is_matched_without_its_spinner(self):
+        self.assertEqual(terminal.bare("◑ Refactor the parser"), "Refactor the parser")
+        self.assertEqual(terminal.bare("✳ Fix the build"), "Fix the build")
+        self.assertEqual(terminal.bare("Plain title"), "Plain title")
+        self.assertEqual(terminal.bare("(draft) notes"), "(draft) notes")  # not a lone symbol
+
+    def test_no_console_selects_nothing(self):
+        with mock.patch.object(terminal.subprocess, "run", wraps=terminal.subprocess.run) as run:
+            self.assertFalse(terminal.select_tab(4, 1))  # System: no console, so no title
+        self.assertEqual(len(run.call_args_list), 1)  # PowerShell never started
+
+    def test_it_selects_only_when_one_tab_matched(self):
+        answers = iter([(1, "◐ Mine"), (1, "◐ Mine"), (1, "◐ Mine")])
+        for printed, selected in (("1\n", True), ("0\n", False), ("2\n", False)):
+            with mock.patch.object(terminal, "console", lambda pid: next(answers)), \
+                    mock.patch.object(terminal.subprocess, "run") as run:
+                run.return_value.stdout = printed
+                self.assertEqual(terminal.select_tab(7, 99), selected)
+            env = run.call_args.kwargs["env"]
+            self.assertEqual((env["MASCOT_TAB"], env["MASCOT_HWND"]), ("Mine", "99"))
 
 
 class Flash(unittest.TestCase):
